@@ -1,0 +1,11 @@
+# Vercel
+.vercel
+
+# Dependencies / build (none used, but just in case)
+node_modules/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log

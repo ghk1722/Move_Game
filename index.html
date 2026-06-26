@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>월드컵 핸드 골키퍼 · 2026 A조</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="stage">
+    <!-- 웹캠: 추적 전용. 화면에는 보이지 않음(사용자 모습 비표시) -->
+    <video id="video" playsinline></video>
+    <!-- 게임 렌더링 캔버스 (경기장 + 공격수 + 공 + 골키퍼 장갑) -->
+    <canvas id="canvas"></canvas>
+
+    <!-- 인게임 HUD -->
+    <div id="hud" class="hidden">
+      <div class="hud-left">
+        <span id="hudMatch">KOR vs MEX</span>
+      </div>
+      <div class="hud-center">
+        <span id="hudScore" class="score">0 : 0</span>
+        <span id="hudShots" class="shots">슛 0/5</span>
+      </div>
+      <div class="hud-right">
+        <span id="hudHands" class="hands">✋✋ 손 인식 대기</span>
+      </div>
+    </div>
+
+    <!-- 손 인식 상태 배지 (카메라 켜진 뒤 항상 표시) -->
+    <div id="track" class="hidden"></div>
+
+    <!-- 경기관리자: 순위별 결과 미리보기 (항상 표시) -->
+    <button id="adminBtn">🎬 결과 미리보기</button>
+
+    <!-- 공격수 변신 모드: 골키퍼로 복귀 -->
+    <button id="strikerExit" class="hidden">← 골키퍼로 돌아가기</button>
+
+    <!-- 메뉴/결과 오버레이 (JS가 화면별로 채움) -->
+    <div id="ui"></div>
+  </div>
+
+  <!-- MediaPipe Hands (손 추적) + Pose (전신·발 추적) -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="data.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
