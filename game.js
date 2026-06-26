@@ -286,25 +286,36 @@ function renderBg() {
 }
 
 // ============================================================
-//  공통 드로잉: 경기장 배경 (관중석 밴드는 투명 → 3D 배경 노출)
+//  공통 드로잉: 경기장 배경 (2D)
 // ============================================================
 function drawStadium() {
-  // 하늘(상단) → 아래로 투명 페이드. 그 아래 밴드(~잔디선)는 3D 관중석/관중
-  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.33);
+  // 하늘
+  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
   sky.addColorStop(0, "#0b1733");
-  sky.addColorStop(0.7, "#13294d");
-  sky.addColorStop(1, "rgba(22,51,94,0)");
+  sky.addColorStop(1, "#16335e");
   ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H * 0.33);
-  // H*0.33 ~ H*0.50 : 투명 — 뒤편 3D 관중석·관중이 보임
+  ctx.fillRect(0, 0, W, H);
 
-  // 잔디 (위쪽을 3D와 자연스럽게 잇는 페이드)
-  const grass = ctx.createLinearGradient(0, H * 0.49, 0, H);
-  grass.addColorStop(0, "rgba(28,111,53,0.6)");
-  grass.addColorStop(0.05, "#1f7a3a");
+  // 관중석
+  ctx.fillStyle = "#0d1b2a";
+  ctx.fillRect(0, H * 0.30, W, H * 0.22);
+  // 관중 점묘
+  ctx.save();
+  for (let y = H * 0.31; y < H * 0.50; y += 7) {
+    for (let x = (y % 14); x < W; x += 9) {
+      const c = (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
+      ctx.fillStyle = c > 0.6 ? "rgba(255,255,255,0.10)" : "rgba(120,160,220,0.08)";
+      ctx.fillRect(x, y, 3, 3);
+    }
+  }
+  ctx.restore();
+
+  // 잔디
+  const grass = ctx.createLinearGradient(0, H * 0.50, 0, H);
+  grass.addColorStop(0, "#1f7a3a");
   grass.addColorStop(1, "#15602c");
   ctx.fillStyle = grass;
-  ctx.fillRect(0, H * 0.49, W, H * 0.51);
+  ctx.fillRect(0, H * 0.50, W, H * 0.50);
   // 잔디 줄무늬(원근)
   ctx.fillStyle = "rgba(255,255,255,0.04)";
   for (let i = 0; i < 8; i += 2) {
@@ -2295,8 +2306,6 @@ function loop(t) {
   const dt = Math.min(50, t - lastTime || 16);
   lastTime = t;
 
-  renderBg();   // 뒤편 3D 관중석/관중 (z0)
-
   if (GAME.screen === "striker" && STRIKER) {
     updateStriker(dt);
     renderStriker(dt);
@@ -2331,9 +2340,6 @@ function loop(t) {
   updateTrackBadge();
   requestAnimationFrame(loop);
 }
-
-// 3D 배경(관중석/관중) 미리 로드
-initBg();
 
 // 경기관리자 버튼 (언제나 결과 미리보기)
 adminBtn.onclick = showAdminPanel;
