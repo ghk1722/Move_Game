@@ -1436,10 +1436,10 @@ function showFinal() {
   const userRank = table.findIndex(t => t.code === GAME.userCode) + 1;
 
   // 순위별 엔딩 컷신
-  if (userRank === 1) startBeerScene(table);        // 1위: 심판이 하이네켄
+  if (userRank === 1) startBeerScene(table);        // 1위: 심판이 맥주(BEER.glb)
   else if (userRank === 2) startHugScene(table);    // 2위: 동료들과 포옹
   else if (userRank === 3) startPetScene(table);    // 3위: 강아지 쓰담쓰담
-  else startArrestScene(table, userRank);           // 4위: 경찰 수갑
+  else startPoliceScene(table);                     // 4위: 경찰차 + 경찰관 2명
 }
 
 // ============================================================
@@ -1695,7 +1695,17 @@ function startBeerScene(table) {
   GAME.screen = "beer";
   hudEl.classList.add("hidden");
   uiEl.innerHTML = "";
-  GAME.beer = { phase: "approach", timer: 0, refX: 1.2, walk: 0, glug: 0, panelShown: false, table };
+  threeBegin();
+  GAME.beer = { phase: "approach", timer: 0, refX: 1.2, walk: 0, panelShown: false, table, beer: null, loaded: false, baseY: 0 };
+  three.camera.position.set(0, 0.05, 2.6); three.camera.lookAt(0, 0, 0); three.camera.updateProjectionMatrix();
+  loadGLB("BEER.glb").then(g => {
+    const b = g.scene, f = fitModel(b, 1.1);
+    b.scale.setScalar(f.s);
+    b.position.set(-f.center.x*f.s, -f.box.min.y*f.s - 0.55, -f.center.z*f.s);
+    b.rotation.set(0, 0, 0);
+    three.content.add(b);
+    GAME.beer.beer = b; GAME.beer.baseY = b.position.y; GAME.beer.loaded = true;
+  }).catch(() => {});
 }
 function updateBeer(dt) {
   const A = GAME.beer; A.timer += dt;
@@ -1706,39 +1716,36 @@ function updateBeer(dt) {
   } else if (A.phase === "give") {
     if (A.timer > 1400) { A.phase = "drink"; A.timer = 0; }
   } else if (A.phase === "drink") {
-    A.glug = Math.sin(A.timer * 0.02);
     if (A.timer > 2100) { A.phase = "done"; A.timer = 0; }
   } else if (A.phase === "done") {
     if (!A.panelShown && A.timer > 500) { A.panelShown = true; showBeerPanel(); }
+  }
+  // 3D 맥주: 들어올려 기울여 마시기
+  if (A.loaded && A.beer) {
+    if (A.phase === "drink" || A.phase === "done") {
+      const p = A.phase === "done" ? 1 : Math.min(1, A.timer/1300);
+      A.beer.position.y = A.baseY + p * 0.35;
+      A.beer.rotation.z = -p * 1.15;
+      if (p > 0.55 && Math.sin(A.timer*0.03) > 0.5) burst(W*0.5, H*0.32, "255,255,255", 2);
+    } else {
+      A.beer.rotation.y += dt * 0.0013;     // 살짝 회전하며 보여줌
+    }
   }
   updateParticles(dt);
 }
 function renderBeer(dt) {
   const A = GAME.beer;
   drawStadium();
-  // 황금빛 축하 분위기
-  ctx.fillStyle = "rgba(251,191,36,0.07)"; ctx.fillRect(0, 0, W, H*0.5);
-
+  ctx.fillStyle = "rgba(251,191,36,0.07)"; ctx.fillRect(0, 0, W, H*0.5);   // 황금빛 분위기
   drawRef({ x: A.refX, y: 0.74, scale: 0.30, walk: A.walk });
   if (GAME.tracking) drawGloves(getCountry(GAME.userCode).colors.glove);
-
-  // 병 위치/기울기 (심판 손 → 화면 중앙 위로 올려 마시기)
-  const s = 0.30 * Math.min(W, H);
-  const handX = A.refX*W + s*0.34, handY = 0.74*H - s*0.42;
-  const bs = Math.min(W, H) * 0.16;
-  let bx = handX, by = handY, tilt = 0;
-  if (A.phase === "drink" || A.phase === "done") {
-    const p = A.phase === "done" ? 1 : Math.min(1, A.timer/1300);
-    bx = lerp(handX, W*0.5, p);
-    by = lerp(handY, H*0.30, p);
-    tilt = -p * 1.15;                       // 뒤로 기울여 마심
-    // 꿀꺽 거품
-    if (p > 0.6 && Math.sin(A.timer*0.03) > 0.5) burst(W*0.5, H*0.30, "255,255,255", 2);
-  }
-  drawBottle(bx, by, bs, tilt);
   drawParticles();
-
-  // 말풍선
+  threeRender();                                                          // 3D 맥주(BEER.glb)
+  if (!A.loaded) {
+    ctx.fillStyle = "#cbd5e1"; ctx.textAlign = "center";
+    ctx.font = `bold ${Math.round(W*0.02)}px 'Segoe UI', sans-serif`;
+    ctx.fillText("🍺 맥주 가져오는 중...", W/2, H*0.5);
+  }
   let line = null;
   if (A.phase === "approach")     line = "골키퍼! 수고 많았어요 🍺";
   else if (A.phase === "give")    line = "조 1위 진출! 한 잔 하세요 🍻";
@@ -1746,13 +1753,14 @@ function renderBeer(dt) {
   if (line) speechBubble(clamp(A.refX*W, W*0.2, W*0.8), 0.74*H - 0.30*Math.min(W,H)*0.92, line);
 }
 function showBeerPanel() {
+  threeHide();
   const me = getCountry(GAME.userCode);
   const userRank = sortedTable().findIndex(t => t.code === GAME.userCode) + 1;
   show(`
     <div class="panel wide">
       <div class="cup">🍺🏆</div>
       <h1 style="color:#4ade80">32강 진출 — 조 ${userRank}위! 🎉</h1>
-      <p class="subtitle">${me.flag} ${me.name} — 완벽한 선방쇼! 심판이 건넨 시원한 <b>하이네켄</b> 한 잔 🍻</p>
+      <p class="subtitle">${me.flag} ${me.name} — 완벽한 선방쇼! 심판이 건넨 시원한 <b>맥주</b> 한 잔 🍻</p>
       ${miniTable()}
       <button id="againBtn">처음으로 돌아갈까요? ↻</button>
     </div>`);
@@ -1790,6 +1798,7 @@ function drawMate(a) {
   ctx.fillStyle = "#1a1410"; ctx.beginPath(); ctx.arc(0, -s*0.70, s*0.10, Math.PI*1.05, Math.PI*2.05); ctx.fill();
   ctx.restore();
 }
+// ---- 조 2위: 동료들과 포옹 ----
 function startHugScene(table) {
   GAME.screen = "hug"; hudEl.classList.add("hidden"); uiEl.innerHTML = "";
   GAME.hug = { phase: "approach", timer: 0, prog: 0, panelShown: false, table };
@@ -1832,6 +1841,89 @@ function showHugPanel() {
       <button id="againBtn">처음으로 돌아갈까요? ↻</button>
     </div>`);
   document.getElementById("againBtn").onclick = () => { GAME.hug = null; showDifficultySelect(); };
+}
+
+// ---- 조 4위: 경찰차 + 경찰관 2명 등장 ----
+// 경찰관(여/남) 로드 — Idle 애니메이션 재생
+function loadOfficer(name, x) {
+  return loadGLB(name).then(g => {
+    const o = g.scene, f = fitModel(o, 2.0);
+    o.scale.setScalar(f.s);
+    o.position.set(x, -f.box.min.y*f.s, 0.4);
+    o.rotation.set(0, Math.PI, 0);
+    three.content.add(o);
+    let mixer = null;
+    if (g.animations && g.animations.length) {
+      mixer = new THREE.AnimationMixer(o);
+      const idle = g.animations.find(a => /idle/i.test(a.name)) || g.animations[0];
+      mixer.clipAction(idle).play();
+    }
+    return { obj: o, mixer };
+  });
+}
+function startPoliceScene(table) {
+  GAME.screen = "police"; hudEl.classList.add("hidden"); uiEl.innerHTML = "";
+  threeBegin();
+  GAME.police = { phase: "approach", timer: 0, t: 0, panelShown: false, table, car: null, fem: null, male: null };
+  three.camera.position.set(0, 1.7, 7); three.camera.lookAt(0, 1.0, 0); three.camera.updateProjectionMatrix();
+  loadGLB("Police Car.glb").then(g => {
+    const car = g.scene, f = fitModel(car, 3.6);
+    car.scale.setScalar(f.s);
+    car.position.set(0, -f.box.min.y*f.s, -2.2);
+    car.rotation.set(0, Math.PI*0.12, 0);
+    three.content.add(car);
+    GAME.police.car = car;
+  }).catch(() => {});
+  loadOfficer("Female Officer.glb", -1.5).then(o => { GAME.police.fem = o; }).catch(() => {});
+  loadOfficer("Male Officer.glb", 1.5).then(o => { GAME.police.male = o; }).catch(() => {});
+}
+function updatePolice(dt) {
+  const A = GAME.police; A.timer += dt; A.t += dt;
+  for (const o of [A.fem, A.male]) if (o && o.mixer) o.mixer.update(dt/1000);
+  if (A.phase === "approach") {
+    const p = Math.min(1, A.timer/1600);
+    if (A.car) A.car.position.z = lerp(-9, -2.2, p);
+    if (A.fem) A.fem.obj.position.z = lerp(-4, 0.4, p);
+    if (A.male) A.male.obj.position.z = lerp(-4, 0.4, p);
+    if (A.timer > 1700) { A.phase = "command"; A.timer = 0; }
+  } else if (A.phase === "command") {
+    if (A.timer > 2800) { A.phase = "done"; A.timer = 0; }
+  } else if (A.phase === "done") {
+    if (!A.panelShown && A.timer > 500) { A.panelShown = true; showPolicePanel(); }
+  }
+  updateParticles(dt);
+}
+function renderPolice(dt) {
+  const A = GAME.police;
+  drawStadium();
+  // 경광등(적·청 점멸)
+  const sir = Math.sin(A.t * 0.012);
+  ctx.fillStyle = `rgba(${sir > 0 ? "239,68,68" : "59,130,246"},${0.10 + 0.07*Math.abs(sir)})`;
+  ctx.fillRect(0, 0, W, H*0.5);
+  if (GAME.tracking) drawGloves(getCountry(GAME.userCode).colors.glove);
+  drawParticles();
+  threeRender();
+  if (!A.car && !A.fem && !A.male) {
+    ctx.fillStyle = "#cbd5e1"; ctx.textAlign = "center";
+    ctx.font = `bold ${Math.round(W*0.02)}px 'Segoe UI', sans-serif`;
+    ctx.fillText("🚓 출동 중...", W/2, H*0.5);
+  }
+  const line = A.phase === "approach" ? "…거기 골키퍼!" : "두 손 보이게 하세요!";
+  speechBubble(W*0.5, H*0.28, line);
+}
+function showPolicePanel() {
+  threeHide();
+  const me = getCountry(GAME.userCode);
+  const r = sortedTable().findIndex(t => t.code === GAME.userCode) + 1;
+  show(`
+    <div class="panel wide">
+      <div class="cup">🚓✋</div>
+      <h1 style="color:#f87171">조 ${r}위 — 16강 진출 실패</h1>
+      <p class="subtitle">${me.flag} ${me.name} — 경찰차가 출동하고 두 경찰관이 <b>"두 손 보이게 하세요!"</b> 다음엔 꼭 막아내자! 🚓</p>
+      ${miniTable()}
+      <button id="againBtn">처음으로 돌아갈까요? ↻</button>
+    </div>`);
+  document.getElementById("againBtn").onclick = () => { GAME.police = null; showDifficultySelect(); };
 }
 
 // ============================================================
@@ -2098,7 +2190,9 @@ function renderStriker(dt) {
 // ============================================================
 //  조 3위 컷신: 강아지(Shiba Inu .glb) 쓰담쓰담 → "집에 가자"
 // ============================================================
+// ---- 공용 3D 시스템 (#three 캔버스 공유, 씬마다 content 교체) ----
 let three = null;
+const GLB = {};
 function initThree() {
   if (three || typeof THREE === "undefined") return;
   const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
@@ -2106,34 +2200,30 @@ function initThree() {
   renderer.setSize(W, H, false);
   if ("outputEncoding" in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 100);
-  camera.position.set(0, 0.8, 4.2); camera.lookAt(0, 0.45, 0);
-  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
-  const d1 = new THREE.DirectionalLight(0xffffff, 1.1); d1.position.set(2, 4, 3); scene.add(d1);
-  const d2 = new THREE.DirectionalLight(0xffffff, 0.4); d2.position.set(-2, 2, -2); scene.add(d2);
-  three = { renderer, scene, camera, dog: null, mixer: null, action: null, clock: null, loaded: false, baseY: 0, err: false };
-  try {
-    const loader = new THREE.GLTFLoader();
-    loader.load(encodeURI("Shiba Inu.glb"), (gltf) => {
-      const dog = gltf.scene;
-      const box = new THREE.Box3().setFromObject(dog);
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-      const sc = 1.7 / Math.max(size.x, size.y, size.z);
-      dog.scale.setScalar(sc);
-      dog.position.x = -center.x * sc;
-      dog.position.z = -center.z * sc;
-      dog.position.y = -box.min.y * sc - 0.7;
-      three.baseY = dog.position.y;
-      dog.rotation.y = Math.PI * 0.08;
-      scene.add(dog);
-      three.dog = dog; three.loaded = true;
-      if (gltf.animations && gltf.animations.length) {
-        three.mixer = new THREE.AnimationMixer(dog);
-        three.action = three.mixer.clipAction(gltf.animations[0]); three.action.play();
-      }
-    }, undefined, (e) => { console.warn("dog load failed", e); three.err = true; });
-  } catch (e) { three.err = true; }
+  scene.add(new THREE.AmbientLight(0xffffff, 1.05));
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.1); d1.position.set(2, 5, 4); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0xffffff, 0.4); d2.position.set(-3, 2, -2); scene.add(d2);
+  const content = new THREE.Group(); scene.add(content);
+  const camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100);
+  three = { renderer, scene, camera, content };
+}
+function loadGLB(name) {
+  return new Promise((res, rej) => {
+    if (GLB[name]) { res(GLB[name]); return; }
+    if (typeof THREE === "undefined" || !THREE.GLTFLoader) { rej(new Error("no loader")); return; }
+    new THREE.GLTFLoader().load(encodeURI(name), g => { GLB[name] = g; res(g); }, undefined, e => { console.warn("glb load fail", name, e); rej(e); });
+  });
+}
+function threeBegin() { initThree(); if (three) three.content.clear(); threeCanvas.classList.remove("hidden"); }
+function threeRender() { if (three) three.renderer.render(three.scene, three.camera); }
+function threeHide() { threeCanvas.classList.add("hidden"); }
+// 모델을 target 크기로 맞추기 위한 정보(스케일/박스/중심) 반환
+function fitModel(obj, target) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const s = target / Math.max(size.x, size.y, size.z);
+  return { box, size, center, s };
 }
 
 // fx 캔버스(z3) 전용 그리기 헬퍼
@@ -2172,11 +2262,20 @@ function fxBubble(cx, baseY, text) {
 
 function startPetScene(table) {
   GAME.screen = "pet"; hudEl.classList.add("hidden"); uiEl.innerHTML = "";
-  initThree();
-  threeCanvas.classList.remove("hidden"); fxCanvas.classList.remove("hidden");
-  GAME.pet = { phase: "intro", timer: 0, t: 0, happy: 0, meter: 0, target: 2600, hearts: [], lastHands: {}, panelShown: false, table };
+  threeBegin(); fxCanvas.classList.remove("hidden");
+  GAME.pet = { phase: "intro", timer: 0, t: 0, happy: 0, meter: 0, target: 2600, hearts: [], lastHands: {}, panelShown: false, table, dog: null, mixer: null, baseY: 0, loaded: false, err: false };
+  three.camera.position.set(0, 0.8, 4.2); three.camera.lookAt(0, 0.45, 0); three.camera.updateProjectionMatrix();
+  loadGLB("Shiba Inu.glb").then(g => {
+    const dog = g.scene, f = fitModel(dog, 1.7);
+    dog.scale.setScalar(f.s);
+    dog.position.set(-f.center.x*f.s, -f.box.min.y*f.s - 0.7, -f.center.z*f.s);
+    dog.rotation.set(0, Math.PI*0.08, 0);
+    three.content.add(dog);
+    GAME.pet.dog = dog; GAME.pet.baseY = dog.position.y; GAME.pet.loaded = true;
+    if (g.animations && g.animations.length) { GAME.pet.mixer = new THREE.AnimationMixer(dog); GAME.pet.mixer.clipAction(g.animations[0]).play(); }
+  }).catch(() => { GAME.pet.err = true; });
 }
-function endPetScene() { threeCanvas.classList.add("hidden"); fxCanvas.classList.add("hidden"); ctxFx.clearRect(0, 0, W, H); }
+function endPetScene() { threeHide(); fxCanvas.classList.add("hidden"); ctxFx.clearRect(0, 0, W, H); }
 function updatePet(dt) {
   const P = GAME.pet; P.timer += dt; P.t += dt;
   let petting = false;
@@ -2203,19 +2302,19 @@ function updatePet(dt) {
   }
   for (const h of P.hearts) { h.y += h.vy; h.life -= dt/900; }
   P.hearts = P.hearts.filter(h => h.life > 0);
-  if (three && three.loaded && three.dog) {
+  if (P.loaded && P.dog) {
     const tt = P.t/1000, wag = 0.5 + P.happy;
-    three.dog.position.y = three.baseY + Math.abs(Math.sin(tt*4*wag)) * 0.10 * (0.4 + P.happy);
-    three.dog.rotation.z = Math.sin(tt*9*wag) * 0.06 * P.happy;
-    three.dog.rotation.y = Math.PI*0.08 + Math.sin(tt*2) * 0.12;
-    if (three.mixer) three.mixer.update(dt/1000 * (1 + P.happy*1.5));
+    P.dog.position.y = P.baseY + Math.abs(Math.sin(tt*4*wag)) * 0.10 * (0.4 + P.happy);
+    P.dog.rotation.z = Math.sin(tt*9*wag) * 0.06 * P.happy;
+    P.dog.rotation.y = Math.PI*0.08 + Math.sin(tt*2) * 0.12;
+    if (P.mixer) P.mixer.update(dt/1000 * (1 + P.happy*1.5));
   }
 }
 function renderPet(dt) {
   const P = GAME.pet;
   drawStadium();
   ctx.fillStyle = "rgba(74,222,128,0.05)"; ctx.fillRect(0, 0, W, H*0.5);
-  if (three && three.renderer) three.renderer.render(three.scene, three.camera);
+  threeRender();
   ctxFx.clearRect(0, 0, W, H);
   fxDrawGloves();
   for (const h of P.hearts) { ctxFx.save(); ctxFx.globalAlpha = Math.max(0, h.life); ctxFx.fillStyle = "#fb7185"; fxHeart(h.x, h.y, h.s); ctxFx.fill(); ctxFx.restore(); }
@@ -2224,10 +2323,10 @@ function renderPet(dt) {
     ctxFx.fillStyle = "rgba(0,0,0,0.4)"; fxRound(bx, by, bw, 16, 8); ctxFx.fill();
     ctxFx.fillStyle = "#fb7185"; fxRound(bx, by, bw*Math.min(1, P.meter/P.target), 16, 8); ctxFx.fill();
   }
-  if (three && three.err) {
+  if (P.err) {
     ctxFx.fillStyle = "#f87171"; ctxFx.textAlign = "center"; ctxFx.font = `bold ${Math.round(W*0.02)}px 'Segoe UI', sans-serif`;
     ctxFx.fillText("(강아지 모델을 못 불러왔어요 — 그래도 쓰담쓰담!)", W/2, H*0.9);
-  } else if (three && !three.loaded) {
+  } else if (!P.loaded) {
     ctxFx.fillStyle = "#cbd5e1"; ctxFx.textAlign = "center"; ctxFx.font = `bold ${Math.round(W*0.022)}px 'Segoe UI', sans-serif`;
     ctxFx.fillText("🐕 강아지 데려오는 중...", W/2, H*0.5);
   }
@@ -2279,7 +2378,7 @@ function showAdminPanel() {
         <button class="rk1" data-r="1">🥇 1위<br><small>심판이 맥주 🍺</small></button>
         <button class="rk2" data-r="2">🥈 2위<br><small>동료들과 포옹 🤗</small></button>
         <button class="rk3" data-r="3">🥉 3위<br><small>강아지 쓰담쓰담 🐕</small></button>
-        <button class="rk4" data-r="4">4위<br><small>경찰 수갑 🚔</small></button>
+        <button class="rk4" data-r="4">4위<br><small>경찰차 출동 🚓</small></button>
       </div>
       <button class="back" id="adminClose">닫기</button>
     </div>`;
@@ -2295,7 +2394,7 @@ function adminPreviewRank(rank) {
   if (rank === 1) startBeerScene(table);
   else if (rank === 2) startHugScene(table);
   else if (rank === 3) startPetScene(table);
-  else startArrestScene(table, rank);
+  else startPoliceScene(table);
 }
 
 // ============================================================
@@ -2318,6 +2417,9 @@ function loop(t) {
   } else if (GAME.screen === "beer" && GAME.beer) {
     updateBeer(dt);
     renderBeer(dt);
+  } else if (GAME.screen === "police" && GAME.police) {
+    updatePolice(dt);
+    renderPolice(dt);
   } else if (GAME.screen === "hug" && GAME.hug) {
     updateHug(dt);
     renderHug(dt);
