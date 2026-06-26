@@ -1864,7 +1864,7 @@ function loadOfficer(name, x) {
 function startPoliceScene(table) {
   GAME.screen = "police"; hudEl.classList.add("hidden"); uiEl.innerHTML = "";
   threeBegin();
-  GAME.police = { phase: "approach", timer: 0, t: 0, panelShown: false, table, car: null, fem: null, male: null };
+  GAME.police = { phase: "approach", timer: 0, t: 0, cuffT: 0, panelShown: false, table, car: null, fem: null, male: null };
   three.camera.position.set(0, 1.7, 7); three.camera.lookAt(0, 1.0, 0); three.camera.updateProjectionMatrix();
   loadGLB("Police Car.glb").then(g => {
     const car = g.scene, f = fitModel(car, 3.6);
@@ -1887,9 +1887,13 @@ function updatePolice(dt) {
     if (A.male) A.male.obj.position.z = lerp(-4, 0.4, p);
     if (A.timer > 1700) { A.phase = "command"; A.timer = 0; }
   } else if (A.phase === "command") {
-    if (A.timer > 2800) { A.phase = "done"; A.timer = 0; }
+    if (A.timer > 2300) { A.phase = "cuff"; A.timer = 0; }
+  } else if (A.phase === "cuff") {
+    A.cuffT = Math.min(1, A.timer / 1300);
+    if (A.timer > 1700) { A.phase = "done"; A.timer = 0; }
   } else if (A.phase === "done") {
-    if (!A.panelShown && A.timer > 500) { A.panelShown = true; showPolicePanel(); }
+    A.cuffT = 1;
+    if (!A.panelShown && A.timer > 700) { A.panelShown = true; showPolicePanel(); }
   }
   updateParticles(dt);
 }
@@ -1901,6 +1905,7 @@ function renderPolice(dt) {
   ctx.fillStyle = `rgba(${sir > 0 ? "239,68,68" : "59,130,246"},${0.10 + 0.07*Math.abs(sir)})`;
   ctx.fillRect(0, 0, W, H*0.5);
   if (GAME.tracking) drawGloves(getCountry(GAME.userCode).colors.glove);
+  if (A.phase === "cuff" || A.phase === "done") drawCuffs(A.cuffT);   // 추적된 양손에 수갑+체인
   drawParticles();
   threeRender();
   if (!A.car && !A.fem && !A.male) {
@@ -1908,8 +1913,16 @@ function renderPolice(dt) {
     ctx.font = `bold ${Math.round(W*0.02)}px 'Segoe UI', sans-serif`;
     ctx.fillText("🚓 출동 중...", W/2, H*0.5);
   }
-  const line = A.phase === "approach" ? "…거기 골키퍼!" : "두 손 보이게 하세요!";
+  let line = "두 손 보이게 하세요!";
+  if (A.phase === "approach") line = "…거기 골키퍼!";
+  else if (A.phase === "cuff" || A.phase === "done") line = "당신을 체포합니다! 🔗";
   speechBubble(W*0.5, H*0.28, line);
+  // 손 미인식 안내(수갑 채우려면 손이 보여야 함)
+  if ((A.phase === "command" || A.phase === "cuff") && hands.length < 2) {
+    ctx.fillStyle = "rgba(255,255,255,0.92)"; ctx.textAlign = "center";
+    ctx.font = `bold ${Math.round(W*0.018)}px 'Segoe UI', sans-serif`;
+    ctx.fillText("✋✋ 두 손을 카메라에 보이세요", W/2, H*0.92);
+  }
 }
 function showPolicePanel() {
   threeHide();
@@ -1919,7 +1932,7 @@ function showPolicePanel() {
     <div class="panel wide">
       <div class="cup">🚓✋</div>
       <h1 style="color:#f87171">조 ${r}위 — 16강 진출 실패</h1>
-      <p class="subtitle">${me.flag} ${me.name} — 경찰차가 출동하고 두 경찰관이 <b>"두 손 보이게 하세요!"</b> 다음엔 꼭 막아내자! 🚓</p>
+      <p class="subtitle">${me.flag} ${me.name} — 경찰차가 출동! 두 경찰관이 <b>"두 손 보이게 하세요!"</b> 외치고 <b>철컹—</b> 수갑까지 🚓🔗 다음엔 꼭 막아내자!</p>
       ${miniTable()}
       <button id="againBtn">처음으로 돌아갈까요? ↻</button>
     </div>`);
