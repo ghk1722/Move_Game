@@ -1436,7 +1436,7 @@ function showFinal() {
   const userRank = table.findIndex(t => t.code === GAME.userCode) + 1;
 
   // 순위별 엔딩 컷신
-  if (userRank === 1) startBeerScene(table);        // 1위: 심판이 맥주(BEER.glb)
+  if (userRank === 1) startBeerScene(table);        // 1위: 심판이 치킨(Drumstick chicken.glb)
   else if (userRank === 2) startHugScene(table);    // 2위: 동료들과 포옹
   else if (userRank === 3) startPetScene(table);    // 3위: 강아지 쓰담쓰담
   else startPoliceScene(table);                     // 4위: 경찰차 + 경찰관 2명
@@ -1698,10 +1698,10 @@ function startBeerScene(table) {
   threeBegin();
   GAME.beer = { phase: "approach", timer: 0, refX: 1.2, walk: 0, panelShown: false, table, beer: null, loaded: false, baseY: 0 };
   three.camera.position.set(0, 0.05, 2.6); three.camera.lookAt(0, 0, 0); three.camera.updateProjectionMatrix();
-  loadGLB("BEER.glb").then(g => {
-    const b = g.scene, f = fitModel(b, 1.1);
+  loadGLB("Drumstick chicken.glb").then(g => {
+    const b = g.scene, f = fitModel(b, 1.25);
     b.scale.setScalar(f.s);
-    b.position.set(-f.center.x*f.s, -f.box.min.y*f.s - 0.55, -f.center.z*f.s);
+    b.position.set(-f.center.x*f.s, -f.center.y*f.s - 0.05, -f.center.z*f.s);   // 화면 중앙
     b.rotation.set(0, 0, 0);
     three.content.add(b);
     GAME.beer.beer = b; GAME.beer.baseY = b.position.y; GAME.beer.loaded = true;
@@ -1720,15 +1720,15 @@ function updateBeer(dt) {
   } else if (A.phase === "done") {
     if (!A.panelShown && A.timer > 500) { A.panelShown = true; showBeerPanel(); }
   }
-  // 3D 맥주: 들어올려 기울여 마시기
+  // 3D 치킨: 입으로 가져가 냠냠 먹기
   if (A.loaded && A.beer) {
     if (A.phase === "drink" || A.phase === "done") {
-      const p = A.phase === "done" ? 1 : Math.min(1, A.timer/1300);
-      A.beer.position.y = A.baseY + p * 0.35;
-      A.beer.rotation.z = -p * 1.15;
-      if (p > 0.55 && Math.sin(A.timer*0.03) > 0.5) burst(W*0.5, H*0.32, "255,255,255", 2);
+      A.beer.position.y = A.baseY + 0.12 + Math.sin(A.timer*0.012)*0.06;     // 베어무는 듯 위아래
+      A.beer.rotation.z = -0.25 + Math.sin(A.timer*0.012)*0.18;
+      A.beer.rotation.y += dt * 0.0006;
+      if (Math.sin(A.timer*0.02) > 0.6) burst(W*0.5, H*0.32, "251,191,36", 2);  // 냠냠
     } else {
-      A.beer.rotation.y += dt * 0.0013;     // 살짝 회전하며 보여줌
+      A.beer.rotation.y += dt * 0.0014;     // 살짝 회전하며 보여줌
     }
   }
   updateParticles(dt);
@@ -1740,16 +1740,16 @@ function renderBeer(dt) {
   drawRef({ x: A.refX, y: 0.74, scale: 0.30, walk: A.walk });
   if (GAME.tracking) drawGloves(getCountry(GAME.userCode).colors.glove);
   drawParticles();
-  threeRender();                                                          // 3D 맥주(BEER.glb)
+  threeRender();                                                          // 3D 치킨(Drumstick chicken.glb)
   if (!A.loaded) {
     ctx.fillStyle = "#cbd5e1"; ctx.textAlign = "center";
     ctx.font = `bold ${Math.round(W*0.02)}px 'Segoe UI', sans-serif`;
-    ctx.fillText("🍺 맥주 가져오는 중...", W/2, H*0.5);
+    ctx.fillText("🍗 치킨 가져오는 중...", W/2, H*0.5);
   }
   let line = null;
-  if (A.phase === "approach")     line = "골키퍼! 수고 많았어요 🍺";
-  else if (A.phase === "give")    line = "조 1위 진출! 한 잔 하세요 🍻";
-  else if (A.phase === "drink")   line = "꿀꺽… 꿀꺽… 🍺";
+  if (A.phase === "approach")     line = "골키퍼! 수고 많았어요 🍗";
+  else if (A.phase === "give")    line = "조 1위 진출! 치킨 먹자! 🍗";
+  else if (A.phase === "drink")   line = "냠냠… 냠냠… 🍗";
   if (line) speechBubble(clamp(A.refX*W, W*0.2, W*0.8), 0.74*H - 0.30*Math.min(W,H)*0.92, line);
 }
 function showBeerPanel() {
@@ -1758,9 +1758,9 @@ function showBeerPanel() {
   const userRank = sortedTable().findIndex(t => t.code === GAME.userCode) + 1;
   show(`
     <div class="panel wide">
-      <div class="cup">🍺🏆</div>
+      <div class="cup">🍗🏆</div>
       <h1 style="color:#4ade80">32강 진출 — 조 ${userRank}위! 🎉</h1>
-      <p class="subtitle">${me.flag} ${me.name} — 완벽한 선방쇼! 심판이 건넨 시원한 <b>맥주</b> 한 잔 🍻</p>
+      <p class="subtitle">${me.flag} ${me.name} — 완벽한 선방쇼! 심판이 건넨 <b>치킨</b> 한 입! <b>치킨 먹자!</b> 🍗</p>
       ${miniTable()}
       <button id="againBtn">처음으로 돌아갈까요? ↻</button>
     </div>`);
@@ -2388,7 +2388,7 @@ function showAdminPanel() {
       <h2>🎬 결과 미리보기</h2>
       <p class="subtitle">최종 순위별 엔딩 컷신을 바로 확인할 수 있어요 (경기관리자)</p>
       <div class="admin-grid">
-        <button class="rk1" data-r="1">🥇 1위<br><small>심판이 맥주 🍺</small></button>
+        <button class="rk1" data-r="1">🥇 1위<br><small>치킨 먹자 🍗</small></button>
         <button class="rk2" data-r="2">🥈 2위<br><small>동료들과 포옹 🤗</small></button>
         <button class="rk3" data-r="3">🥉 3위<br><small>강아지 쓰담쓰담 🐕</small></button>
         <button class="rk4" data-r="4">4위<br><small>경찰차 출동 🚓</small></button>
