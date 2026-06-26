@@ -12,6 +12,9 @@ const { COUNTRIES, getCountry } = window.WC;
 const videoEl = document.getElementById("video");
 const canvas  = document.getElementById("canvas");
 const ctx     = canvas.getContext("2d");
+const threeCanvas = document.getElementById("three");
+const fxCanvas = document.getElementById("fx");
+const ctxFx   = fxCanvas.getContext("2d");
 const uiEl    = document.getElementById("ui");
 const trackEl = document.getElementById("track");
 const adminBtn = document.getElementById("adminBtn");
@@ -24,7 +27,12 @@ const hudHands = document.getElementById("hudHands");
 
 // ---- 캔버스 크기 ----
 let W = 0, H = 0;
-function resize() { W = canvas.width = innerWidth; H = canvas.height = innerHeight; try { NET.built = false; } catch (e) {} }
+function resize() {
+  W = canvas.width = innerWidth; H = canvas.height = innerHeight;
+  fxCanvas.width = W; fxCanvas.height = H;
+  try { NET.built = false; } catch (e) {}
+  try { if (three && three.renderer) { three.renderer.setSize(W, H, false); three.camera.aspect = W/H; three.camera.updateProjectionMatrix(); } } catch (e) {}
+}
 addEventListener("resize", resize); resize();
 
 // ---- 공용 수학 헬퍼 ----
@@ -1362,7 +1370,7 @@ function showFinal() {
   // 순위별 엔딩 컷신
   if (userRank === 1) startBeerScene(table);        // 1위: 심판이 하이네켄
   else if (userRank === 2) startHugScene(table);    // 2위: 동료들과 포옹
-  else if (userRank === 3) startSlapScene(table);   // 3위: 감독에게 뺨 5대
+  else if (userRank === 3) startPetScene(table);    // 3위: 강아지 쓰담쓰담
   else startArrestScene(table, userRank);           // 4위: 경찰 수갑
 }
 
@@ -2020,6 +2028,163 @@ function renderStriker(dt) {
 }
 
 // ============================================================
+//  조 3위 컷신: 강아지(Shiba Inu .glb) 쓰담쓰담 → "집에 가자"
+// ============================================================
+let three = null;
+function initThree() {
+  if (three || typeof THREE === "undefined") return;
+  const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(W, H, false);
+  if ("outputEncoding" in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 100);
+  camera.position.set(0, 0.8, 4.2); camera.lookAt(0, 0.45, 0);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+  const d1 = new THREE.DirectionalLight(0xffffff, 1.1); d1.position.set(2, 4, 3); scene.add(d1);
+  const d2 = new THREE.DirectionalLight(0xffffff, 0.4); d2.position.set(-2, 2, -2); scene.add(d2);
+  three = { renderer, scene, camera, dog: null, mixer: null, action: null, clock: null, loaded: false, baseY: 0, err: false };
+  try {
+    const loader = new THREE.GLTFLoader();
+    loader.load(encodeURI("Shiba Inu.glb"), (gltf) => {
+      const dog = gltf.scene;
+      const box = new THREE.Box3().setFromObject(dog);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const sc = 1.7 / Math.max(size.x, size.y, size.z);
+      dog.scale.setScalar(sc);
+      dog.position.x = -center.x * sc;
+      dog.position.z = -center.z * sc;
+      dog.position.y = -box.min.y * sc - 0.7;
+      three.baseY = dog.position.y;
+      dog.rotation.y = Math.PI * 0.08;
+      scene.add(dog);
+      three.dog = dog; three.loaded = true;
+      if (gltf.animations && gltf.animations.length) {
+        three.mixer = new THREE.AnimationMixer(dog);
+        three.action = three.mixer.clipAction(gltf.animations[0]); three.action.play();
+      }
+    }, undefined, (e) => { console.warn("dog load failed", e); three.err = true; });
+  } catch (e) { three.err = true; }
+}
+
+// fx 캔버스(z3) 전용 그리기 헬퍼
+function fxChain(pts, idxs) { ctxFx.beginPath(); idxs.forEach((i, k) => { const [x, y] = pts[i]; k ? ctxFx.lineTo(x, y) : ctxFx.moveTo(x, y); }); ctxFx.stroke(); }
+function fxRound(x, y, w, h, r) { ctxFx.beginPath(); ctxFx.moveTo(x+r,y); ctxFx.arcTo(x+w,y,x+w,y+h,r); ctxFx.arcTo(x+w,y+h,x,y+h,r); ctxFx.arcTo(x,y+h,x,y,r); ctxFx.arcTo(x,y,x+w,y,r); ctxFx.closePath(); }
+function fxHeart(cx, cy, sz) { ctxFx.beginPath(); ctxFx.moveTo(cx,cy+sz*0.3); ctxFx.bezierCurveTo(cx+sz,cy-sz*0.4,cx+sz*0.4,cy-sz*0.9,cx,cy-sz*0.3); ctxFx.bezierCurveTo(cx-sz*0.4,cy-sz*0.9,cx-sz,cy-sz*0.4,cx,cy+sz*0.3); ctxFx.closePath(); }
+function fxDrawGloves() {
+  const gcol = GAME.userCode ? getCountry(GAME.userCode).colors.glove : "#e63946";
+  const dark = shade(gcol, -45), minWH = Math.min(W, H);
+  const FINGERS = [[1,2,3,4],[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]];
+  for (const h of hands) {
+    const pts = h.landmarks.map(p => [(1-p.x)*W, p.y*H]);
+    const hr = h.r*minWH; if (hr < 4) continue;
+    const fW = hr*0.42; ctxFx.lineCap = "round"; ctxFx.lineJoin = "round";
+    for (const f of FINGERS) { ctxFx.strokeStyle = dark; ctxFx.lineWidth = fW*1.3; fxChain(pts, [0, ...f]); }
+    for (const f of FINGERS) { ctxFx.strokeStyle = gcol; ctxFx.lineWidth = fW; fxChain(pts, [0, ...f]); }
+    ctxFx.fillStyle = gcol; ctxFx.strokeStyle = dark; ctxFx.lineWidth = hr*0.08;
+    ctxFx.beginPath(); [0,1,5,9,13,17].forEach((i,k)=>{const[x,y]=pts[i];k?ctxFx.lineTo(x,y):ctxFx.moveTo(x,y);}); ctxFx.closePath(); ctxFx.fill(); ctxFx.stroke();
+    const wp = pts[0];
+    ctxFx.fillStyle = "#fff"; ctxFx.beginPath(); ctxFx.arc(wp[0], wp[1], hr*0.28, 0, Math.PI*2); ctxFx.fill();
+    ctxFx.fillStyle = gcol; ctxFx.beginPath(); ctxFx.arc(wp[0], wp[1], hr*0.16, 0, Math.PI*2); ctxFx.fill();
+  }
+}
+function fxBubble(cx, baseY, text) {
+  ctxFx.save();
+  ctxFx.font = `bold ${Math.round(W*0.026)}px 'Segoe UI','Malgun Gothic',sans-serif`;
+  const padX = W*0.02, padY = H*0.02, tw = ctxFx.measureText(text).width;
+  const bw = tw + padX*2, bh = Math.round(W*0.026) + padY*2, x = cx - bw/2, y = baseY - bh;
+  ctxFx.fillStyle = "rgba(255,255,255,0.97)"; ctxFx.strokeStyle = "#4ade80"; ctxFx.lineWidth = 3;
+  fxRound(x, y, bw, bh, 14); ctxFx.fill(); ctxFx.stroke();
+  ctxFx.beginPath(); ctxFx.moveTo(cx-12, y+bh-1); ctxFx.lineTo(cx, y+bh+18); ctxFx.lineTo(cx+12, y+bh-1);
+  ctxFx.fillStyle = "rgba(255,255,255,0.97)"; ctxFx.fill(); ctxFx.strokeStyle = "#4ade80"; ctxFx.stroke();
+  ctxFx.fillStyle = "#11151f"; ctxFx.textAlign = "center"; ctxFx.textBaseline = "middle";
+  ctxFx.fillText(text, cx, y+bh/2); ctxFx.restore();
+}
+
+function startPetScene(table) {
+  GAME.screen = "pet"; hudEl.classList.add("hidden"); uiEl.innerHTML = "";
+  initThree();
+  threeCanvas.classList.remove("hidden"); fxCanvas.classList.remove("hidden");
+  GAME.pet = { phase: "intro", timer: 0, t: 0, happy: 0, meter: 0, target: 2600, hearts: [], lastHands: {}, panelShown: false, table };
+}
+function endPetScene() { threeCanvas.classList.add("hidden"); fxCanvas.classList.add("hidden"); ctxFx.clearRect(0, 0, W, H); }
+function updatePet(dt) {
+  const P = GAME.pet; P.timer += dt; P.t += dt;
+  let petting = false;
+  const cx = W*0.5, cy = H*0.55, rx = W*0.22, ry = H*0.28;
+  for (const h of hands) {
+    const hx = h.x*W, hy = h.y*H, L = P.lastHands[h.label] || { x: hx, y: hy };
+    const sp = Math.hypot(hx - L.x, hy - L.y);
+    P.lastHands[h.label] = { x: hx, y: hy };
+    if (Math.abs(hx - cx) < rx && Math.abs(hy - cy) < ry && sp > 4) {
+      petting = true;
+      if (Math.random() < 0.4) P.hearts.push({ x: hx, y: hy - 10, vy: -1 - Math.random()*1.5, life: 1, s: 9 + Math.random()*12 });
+    }
+  }
+  if (P.phase === "intro") { if (P.timer > 1400) { P.phase = "petting"; P.timer = 0; } }
+  else if (P.phase === "petting") {
+    if (petting) { P.meter += dt; P.happy = Math.min(1, P.happy + dt/600); }
+    else P.happy = Math.max(0, P.happy - dt/900);
+    if (P.meter >= P.target) { P.phase = "happy"; P.timer = 0; }
+  } else if (P.phase === "happy") {
+    P.happy = Math.min(1, P.happy + dt/300);
+    if (P.timer > 2600) { P.phase = "done"; P.timer = 0; }
+  } else if (P.phase === "done") {
+    if (!P.panelShown && P.timer > 400) { P.panelShown = true; showPetPanel(); }
+  }
+  for (const h of P.hearts) { h.y += h.vy; h.life -= dt/900; }
+  P.hearts = P.hearts.filter(h => h.life > 0);
+  if (three && three.loaded && three.dog) {
+    const tt = P.t/1000, wag = 0.5 + P.happy;
+    three.dog.position.y = three.baseY + Math.abs(Math.sin(tt*4*wag)) * 0.10 * (0.4 + P.happy);
+    three.dog.rotation.z = Math.sin(tt*9*wag) * 0.06 * P.happy;
+    three.dog.rotation.y = Math.PI*0.08 + Math.sin(tt*2) * 0.12;
+    if (three.mixer) three.mixer.update(dt/1000 * (1 + P.happy*1.5));
+  }
+}
+function renderPet(dt) {
+  const P = GAME.pet;
+  drawStadium();
+  ctx.fillStyle = "rgba(74,222,128,0.05)"; ctx.fillRect(0, 0, W, H*0.5);
+  if (three && three.renderer) three.renderer.render(three.scene, three.camera);
+  ctxFx.clearRect(0, 0, W, H);
+  fxDrawGloves();
+  for (const h of P.hearts) { ctxFx.save(); ctxFx.globalAlpha = Math.max(0, h.life); ctxFx.fillStyle = "#fb7185"; fxHeart(h.x, h.y, h.s); ctxFx.fill(); ctxFx.restore(); }
+  if (P.phase === "petting") {
+    const bw = W*0.30, bx = W*0.5 - bw/2, by = H*0.16;
+    ctxFx.fillStyle = "rgba(0,0,0,0.4)"; fxRound(bx, by, bw, 16, 8); ctxFx.fill();
+    ctxFx.fillStyle = "#fb7185"; fxRound(bx, by, bw*Math.min(1, P.meter/P.target), 16, 8); ctxFx.fill();
+  }
+  if (three && three.err) {
+    ctxFx.fillStyle = "#f87171"; ctxFx.textAlign = "center"; ctxFx.font = `bold ${Math.round(W*0.02)}px 'Segoe UI', sans-serif`;
+    ctxFx.fillText("(강아지 모델을 못 불러왔어요 — 그래도 쓰담쓰담!)", W/2, H*0.9);
+  } else if (three && !three.loaded) {
+    ctxFx.fillStyle = "#cbd5e1"; ctxFx.textAlign = "center"; ctxFx.font = `bold ${Math.round(W*0.022)}px 'Segoe UI', sans-serif`;
+    ctxFx.fillText("🐕 강아지 데려오는 중...", W/2, H*0.5);
+  }
+  let line = null;
+  if (P.phase === "intro") line = "어? 강아지다! 🐕";
+  else if (P.phase === "petting") line = P.happy > 0.5 ? "그래쪄~ 착하지 🐶" : "양손으로 쓰담쓰담 해주세요 🖐️";
+  else line = "집에 가자 🐶❤️";
+  fxBubble(W*0.5, H*0.32, line);
+}
+function showPetPanel() {
+  const me = getCountry(GAME.userCode);
+  const r = sortedTable().findIndex(t => t.code === GAME.userCode) + 1;
+  endPetScene();
+  show(`
+    <div class="panel wide">
+      <div class="cup">🐕❤️</div>
+      <h1 style="color:#fbbf24">조 ${r}위 — 아쉽게 탈락…</h1>
+      <p class="subtitle">${me.flag} ${me.name} — 하지만 강아지가 기다리고 있었어요. 쓰담쓰담 받고 신난 강아지와 함께 <b>집에 가자!</b> 🐶🏠</p>
+      ${miniTable()}
+      <button id="againBtn">처음으로 돌아갈까요? ↻</button>
+    </div>`);
+  document.getElementById("againBtn").onclick = () => { GAME.pet = null; showDifficultySelect(); };
+}
+
+// ============================================================
 //  경기관리자: 순위별 엔딩 미리보기
 // ============================================================
 function adminFakeTable(rank) {
@@ -2045,7 +2210,7 @@ function showAdminPanel() {
       <div class="admin-grid">
         <button class="rk1" data-r="1">🥇 1위<br><small>심판이 맥주 🍺</small></button>
         <button class="rk2" data-r="2">🥈 2위<br><small>동료들과 포옹 🤗</small></button>
-        <button class="rk3" data-r="3">🥉 3위<br><small>감독에게 뺨 5대 👋</small></button>
+        <button class="rk3" data-r="3">🥉 3위<br><small>강아지 쓰담쓰담 🐕</small></button>
         <button class="rk4" data-r="4">4위<br><small>경찰 수갑 🚔</small></button>
       </div>
       <button class="back" id="adminClose">닫기</button>
@@ -2061,7 +2226,7 @@ function adminPreviewRank(rank) {
   const table = sortedTable();
   if (rank === 1) startBeerScene(table);
   else if (rank === 2) startHugScene(table);
-  else if (rank === 3) startSlapScene(table);
+  else if (rank === 3) startPetScene(table);
   else startArrestScene(table, rank);
 }
 
@@ -2091,6 +2256,9 @@ function loop(t) {
   } else if (GAME.screen === "slap" && GAME.slap) {
     updateSlap(dt);
     renderSlap(dt);
+  } else if (GAME.screen === "pet" && GAME.pet) {
+    updatePet(dt);
+    renderPet(dt);
   } else {
     // 메뉴 화면 배경 + (카메라 켜졌으면) 장갑 미리보기로 인식 확인
     drawStadium();

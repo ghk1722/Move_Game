@@ -12,6 +12,10 @@
     <video id="video" playsinline></video>
     <!-- 게임 렌더링 캔버스 (경기장 + 공격수 + 공 + 골키퍼 장갑) -->
     <canvas id="canvas"></canvas>
+    <!-- 3D 강아지(Three.js) — 3위 엔딩에서만 사용 -->
+    <canvas id="three" class="hidden"></canvas>
+    <!-- 오버레이(장갑·하트·말풍선) — 3위 엔딩에서만 사용 -->
+    <canvas id="fx" class="hidden"></canvas>
 
     <!-- 인게임 HUD -->
     <div id="hud" class="hidden">
@@ -44,6 +48,9 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4/hands.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3/camera_utils.js" crossorigin="anonymous"></script>
+  <!-- Three.js + GLTFLoader (3D 강아지 모델) -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
   <script src="data.js"></script>
   <script src="game.js"></script>
 </body>
