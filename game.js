@@ -15,6 +15,7 @@ const ctx     = canvas.getContext("2d");
 const threeCanvas = document.getElementById("three");
 const fxCanvas = document.getElementById("fx");
 const ctxFx   = fxCanvas.getContext("2d");
+const bg3dCanvas = document.getElementById("bg3d");
 const uiEl    = document.getElementById("ui");
 const trackEl = document.getElementById("track");
 const adminBtn = document.getElementById("adminBtn");
@@ -32,6 +33,7 @@ function resize() {
   fxCanvas.width = W; fxCanvas.height = H;
   try { NET.built = false; } catch (e) {}
   try { if (three && three.renderer) { three.renderer.setSize(W, H, false); three.camera.aspect = W/H; three.camera.updateProjectionMatrix(); } } catch (e) {}
+  try { if (bg && bg.renderer) { bg.renderer.setSize(W, H, false); bg.camera.aspect = W/H; bg.camera.updateProjectionMatrix(); } } catch (e) {}
 }
 addEventListener("resize", resize); resize();
 
@@ -218,36 +220,91 @@ function updateTrackBadge() {
 }
 
 // ============================================================
-//  공통 드로잉: 경기장 배경
+//  3D 배경: 관중석(Stadium Seats) + 관중(crowd) — 플레이 뒤편
 // ============================================================
-function drawStadium() {
-  // 하늘
-  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
-  sky.addColorStop(0, "#0b1733");
-  sky.addColorStop(1, "#16335e");
-  ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H);
-
-  // 관중석
-  ctx.fillStyle = "#0d1b2a";
-  ctx.fillRect(0, H * 0.30, W, H * 0.22);
-  // 관중 점묘
-  ctx.save();
-  for (let y = H * 0.31; y < H * 0.50; y += 7) {
-    for (let x = (y % 14); x < W; x += 9) {
-      const c = (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
-      ctx.fillStyle = c > 0.6 ? "rgba(255,255,255,0.10)" : "rgba(120,160,220,0.08)";
-      ctx.fillRect(x, y, 3, 3);
+let bg = null;
+function initBg() {
+  if (bg || typeof THREE === "undefined") return;
+  const renderer = new THREE.WebGLRenderer({ canvas: bg3dCanvas, antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setSize(W, H, false);
+  renderer.setClearColor(0x16335e, 1);     // 하늘색(2D 하늘과 연결)
+  if ("outputEncoding" in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x16335e, 14, 40);       // 먼 곳 하늘로 페이드
+  const camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 300);
+  scene.add(new THREE.AmbientLight(0xaeb9d8, 0.95));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.55); dl.position.set(-4, 8, 6); scene.add(dl);
+  bg = { renderer, scene, camera, ready: false, seats: null, crowd: null };
+  const loader = new THREE.GLTFLoader();
+  let pending = 2;
+  const done = () => { if (--pending === 0) arrangeBg(); };
+  loader.load(encodeURI("Stadium Seats.glb"), g => { bg.seats = g.scene; done(); }, undefined, e => { console.warn("seats fail", e); done(); });
+  loader.load(encodeURI("crowd.glb"),         g => { bg.crowd = g.scene; done(); }, undefined, e => { console.warn("crowd fail", e); done(); });
+}
+function darkenObj(obj, k) {
+  obj.traverse(o => {
+    if (o.isMesh && o.material) {
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      ms.forEach(m => { if (m.color) m.color.multiplyScalar(k); });
+    }
+  });
+}
+function arrangeBg() {
+  const root = new THREE.Group();
+  // 관중석 구조: 화면 폭 전체로 넓게 깔아 좌우를 채움 (어둡게)
+  // 관중석을 살짝 기울여 객석이 카메라를 향하게(관중이 보이도록)
+  const TILT = -0.5;
+  if (bg.seats) {
+    darkenObj(bg.seats, 0.32);                 // 어둡게(차분한 배경)
+    for (let i = -1; i <= 1; i++) { const s = bg.seats.clone(); s.position.x = i * 21; s.rotation.x = TILT; root.add(s); }
+  }
+  // 관중: 기운 객석을 따라 채움(가로 전체) — 어둡게 가라앉힘
+  if (bg.crowd) {
+    darkenObj(bg.crowd, 0.42);
+    const cols = 9, rows = 3;
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+      const c = bg.crowd.clone(); c.scale.setScalar(1.05);
+      const depth = (j - (rows - 1) / 2) * 2.6;
+      c.rotation.x = TILT;
+      c.position.set((i - (cols - 1) / 2) * 4.6, 1.0 - depth * Math.sin(TILT), depth * Math.cos(TILT));
+      root.add(c);
     }
   }
-  ctx.restore();
+  const center = new THREE.Box3().setFromObject(root).getCenter(new THREE.Vector3());
+  root.position.x -= center.x; root.position.y -= center.y; root.position.z -= center.z;
+  root.position.y += 1.2;
+  bg.scene.add(root); bg.root = root;
+  // 카메라: 원경에서 살짝 올려다봄(차분한 원경 스탠드)
+  bg.camera.position.set(0, 3.2, 24);
+  bg.camera.lookAt(0, 2.2, 0);
+  bg.camera.updateProjectionMatrix();
+  bg.ready = true;
+}
+function renderBg() {
+  if (bg && bg.renderer) bg.renderer.render(bg.scene, bg.camera);
+}
 
-  // 잔디
-  const grass = ctx.createLinearGradient(0, H * 0.50, 0, H);
-  grass.addColorStop(0, "#1f7a3a");
+// ============================================================
+//  공통 드로잉: 경기장 배경 (관중석 밴드는 투명 → 3D 배경 노출)
+// ============================================================
+function drawStadium() {
+  // 하늘(상단) → 아래로 투명 페이드. 그 아래 밴드(~잔디선)는 3D 관중석/관중
+  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.33);
+  sky.addColorStop(0, "#0b1733");
+  sky.addColorStop(0.7, "#13294d");
+  sky.addColorStop(1, "rgba(22,51,94,0)");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, W, H * 0.33);
+  // H*0.33 ~ H*0.50 : 투명 — 뒤편 3D 관중석·관중이 보임
+
+  // 잔디 (위쪽을 3D와 자연스럽게 잇는 페이드)
+  const grass = ctx.createLinearGradient(0, H * 0.49, 0, H);
+  grass.addColorStop(0, "rgba(28,111,53,0.6)");
+  grass.addColorStop(0.05, "#1f7a3a");
   grass.addColorStop(1, "#15602c");
   ctx.fillStyle = grass;
-  ctx.fillRect(0, H * 0.50, W, H * 0.50);
+  ctx.fillRect(0, H * 0.49, W, H * 0.51);
   // 잔디 줄무늬(원근)
   ctx.fillStyle = "rgba(255,255,255,0.04)";
   for (let i = 0; i < 8; i += 2) {
@@ -2238,6 +2295,8 @@ function loop(t) {
   const dt = Math.min(50, t - lastTime || 16);
   lastTime = t;
 
+  renderBg();   // 뒤편 3D 관중석/관중 (z0)
+
   if (GAME.screen === "striker" && STRIKER) {
     updateStriker(dt);
     renderStriker(dt);
@@ -2272,6 +2331,9 @@ function loop(t) {
   updateTrackBadge();
   requestAnimationFrame(loop);
 }
+
+// 3D 배경(관중석/관중) 미리 로드
+initBg();
 
 // 경기관리자 버튼 (언제나 결과 미리보기)
 adminBtn.onclick = showAdminPanel;

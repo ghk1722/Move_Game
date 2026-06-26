@@ -19,6 +19,7 @@ html, body {
   pointer-events: none; backdrop-filter: blur(4px); text-shadow: 0 1px 4px rgba(0,0,0,0.6);
 }
 
+#bg3d   { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
 #canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
 #three  { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
 #fx     { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; }
