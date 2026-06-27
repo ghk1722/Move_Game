@@ -288,7 +288,7 @@ function renderBg() {
 // ============================================================
 //  공통 드로잉: 경기장 배경 (2D)
 // ============================================================
-function drawStadium() {
+function drawStadium(showGoal = true) {
   // 하늘
   const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
   sky.addColorStop(0, "#0b1733");
@@ -324,7 +324,7 @@ function drawStadium() {
     ctx.fillRect(0, y0, W, y1 - y0);
   }
 
-  drawGoalFrame();
+  if (showGoal) drawGoalFrame();
 }
 
 // 골대(골키퍼 시점이라 화면을 거의 가득 채움)
@@ -1437,7 +1437,7 @@ function showFinal() {
 
   // 순위별 엔딩 컷신
   if (userRank === 1) startBeerScene(table);        // 1위: 심판이 치킨(Drumstick chicken.glb)
-  else if (userRank === 2) startHugScene(table);    // 2위: 동료들과 포옹
+  else if (userRank === 2) startHighFiveScene(table); // 2위: 동료 3명과 하이파이브
   else if (userRank === 3) startPetScene(table);    // 3위: 강아지 쓰담쓰담
   else startPoliceScene(table);                     // 4위: 경찰차 + 경찰관 2명
 }
@@ -1691,12 +1691,15 @@ function drawBottle(x, y, sc, tilt) {
   ctx.restore();
 }
 
+const CHICKEN_BITES = 4;
 function startBeerScene(table) {
   GAME.screen = "beer";
   hudEl.classList.add("hidden");
   uiEl.innerHTML = "";
   threeBegin();
-  GAME.beer = { phase: "approach", timer: 0, refX: 1.2, walk: 0, panelShown: false, table, beer: null, loaded: false, baseY: 0 };
+  GAME.beer = { phase: "approach", timer: 0, refX: 1.2, walk: 0, panelShown: false, table,
+                beer: null, loaded: false, baseY: 0, baseScale: 1,
+                bites: CHICKEN_BITES, bitesLeft: CHICKEN_BITES, biteCool: 0, chompT: 0, lastHands: {} };
   three.camera.position.set(0, 0.05, 2.6); three.camera.lookAt(0, 0, 0); three.camera.updateProjectionMatrix();
   loadGLB("Drumstick chicken.glb").then(g => {
     const b = g.scene, f = fitModel(b, 1.25);
@@ -1704,32 +1707,52 @@ function startBeerScene(table) {
     b.position.set(-f.center.x*f.s, -f.center.y*f.s - 0.05, -f.center.z*f.s);   // 화면 중앙
     b.rotation.set(0, 0, 0);
     three.content.add(b);
-    GAME.beer.beer = b; GAME.beer.baseY = b.position.y; GAME.beer.loaded = true;
+    GAME.beer.beer = b; GAME.beer.baseY = b.position.y; GAME.beer.baseScale = f.s; GAME.beer.loaded = true;
   }).catch(() => {});
+}
+// 치킨 화면 좌표/히트영역(남은 조각에 따라 작아짐)
+function chickenHit(A) {
+  const frac = A.bitesLeft / A.bites;
+  return { x: W*0.5, y: H*0.46, r: Math.min(W,H)*0.17*(0.4 + 0.6*frac) };
 }
 function updateBeer(dt) {
   const A = GAME.beer; A.timer += dt;
+  if (A.biteCool > 0) A.biteCool -= dt;
+  if (A.chompT > 0) A.chompT -= dt;
   if (A.phase === "approach") {
     A.walk += dt * 0.02;
     A.refX = lerp(1.2, 0.66, Math.min(1, A.timer/1500));
     if (A.timer >= 1500) { A.phase = "give"; A.timer = 0; }
   } else if (A.phase === "give") {
-    if (A.timer > 1400) { A.phase = "drink"; A.timer = 0; }
-  } else if (A.phase === "drink") {
-    if (A.timer > 2100) { A.phase = "done"; A.timer = 0; }
-  } else if (A.phase === "done") {
-    if (!A.panelShown && A.timer > 500) { A.panelShown = true; showBeerPanel(); }
-  }
-  // 3D 치킨: 입으로 가져가 냠냠 먹기
-  if (A.loaded && A.beer) {
-    if (A.phase === "drink" || A.phase === "done") {
-      A.beer.position.y = A.baseY + 0.12 + Math.sin(A.timer*0.012)*0.06;     // 베어무는 듯 위아래
-      A.beer.rotation.z = -0.25 + Math.sin(A.timer*0.012)*0.18;
-      A.beer.rotation.y += dt * 0.0006;
-      if (Math.sin(A.timer*0.02) > 0.6) burst(W*0.5, H*0.32, "251,191,36", 2);  // 냠냠
-    } else {
-      A.beer.rotation.y += dt * 0.0014;     // 살짝 회전하며 보여줌
+    if (A.timer > 1300) { A.phase = "eat"; A.timer = 0; }
+  } else if (A.phase === "eat") {
+    // 손으로 치킨을 만지면 한 입씩! 조각이 사라짐
+    const hit = chickenHit(A);
+    for (const h of hands) {
+      const hx = h.x*W, hy = h.y*H, key = h.label || "h";
+      const L = A.lastHands[key] || { x: hx, y: hy };
+      const sp = Math.hypot(hx - L.x, hy - L.y);
+      A.lastHands[key] = { x: hx, y: hy };
+      if (A.bitesLeft > 0 && A.biteCool <= 0 && Math.hypot(hx - hit.x, hy - hit.y) < hit.r && sp > 3) {
+        A.bitesLeft--; A.biteCool = 420; A.chompT = 600; playKick();
+        burst(hit.x, hit.y, "251,191,36", 18);
+      }
     }
+    if (A.bitesLeft <= 0 && A.timer > 600) { A.phase = "done"; A.timer = 0; }
+  } else if (A.phase === "done") {
+    if (!A.panelShown && A.timer > 700) { A.panelShown = true; showBeerPanel(); }
+  }
+  // 3D 치킨: 남은 조각만큼 크기, 살짝 흔들/회전 + 한 입 먹을 때 들썩
+  if (A.loaded && A.beer) {
+    const frac = Math.max(0, A.bitesLeft / A.bites);
+    const target = A.baseScale * (0.12 + 0.88*frac);
+    const cur = A.beer.scale.x;
+    A.beer.scale.setScalar(lerp(cur, target, 0.18));
+    A.beer.visible = A.bitesLeft > 0 || A.phase === "eat";
+    const chomp = A.chompT > 0 ? Math.sin((600 - A.chompT)*0.02)*0.12 : 0;
+    A.beer.position.y = A.baseY + 0.04 + chomp;
+    A.beer.rotation.z = chomp*1.2;
+    A.beer.rotation.y += dt * 0.0012;
   }
   updateParticles(dt);
 }
@@ -1746,10 +1769,29 @@ function renderBeer(dt) {
     ctx.font = `bold ${Math.round(W*0.02)}px 'Segoe UI', sans-serif`;
     ctx.fillText("🍗 치킨 가져오는 중...", W/2, H*0.5);
   }
+  // 먹는 단계: 안내 + 남은 조각 + 냠냠
+  if (A.phase === "eat") {
+    ctx.textAlign = "center";
+    if (A.bitesLeft > 0) {
+      const hit = chickenHit(A);
+      ctx.save(); ctx.globalAlpha = 0.35 + 0.25*Math.sin(A.timer*0.006);
+      ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(hit.x, hit.y, hit.r, 0, Math.PI*2); ctx.stroke(); ctx.restore();
+      ctx.fillStyle = "#fde68a"; ctx.font = `bold ${Math.round(W*0.020)}px 'Segoe UI', sans-serif`;
+      ctx.fillText("✋ 손으로 치킨을 만져서 한 입씩 먹어요!", W/2, H*0.86);
+      ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.round(W*0.024)}px 'Segoe UI', sans-serif`;
+      ctx.fillText("🍗 ".repeat(A.bitesLeft) || "", W/2, H*0.91);
+    }
+    if (A.chompT > 0) {
+      ctx.save(); ctx.globalAlpha = clamp(A.chompT/400, 0, 1);
+      ctx.fillStyle = "#fbbf24"; ctx.font = `900 ${Math.round(W*0.05)}px 'Segoe UI', sans-serif`;
+      ctx.fillText("냠냠!", W/2, H*0.30); ctx.restore();
+    }
+  }
   let line = null;
-  if (A.phase === "approach")     line = "골키퍼! 수고 많았어요 🍗";
-  else if (A.phase === "give")    line = "조 1위 진출! 치킨 먹자! 🍗";
-  else if (A.phase === "drink")   line = "냠냠… 냠냠… 🍗";
+  if (A.phase === "approach")    line = "골키퍼! 수고 많았어요 🍗";
+  else if (A.phase === "give")   line = "조 1위 진출! 치킨 먹자! 🍗";
+  else if (A.phase === "eat" && A.bitesLeft <= 0) line = "냠냠… 잘 먹었다! 🍗";
   if (line) speechBubble(clamp(A.refX*W, W*0.2, W*0.8), 0.74*H - 0.30*Math.min(W,H)*0.92, line);
 }
 function showBeerPanel() {
@@ -1760,7 +1802,7 @@ function showBeerPanel() {
     <div class="panel wide">
       <div class="cup">🍗🏆</div>
       <h1 style="color:#4ade80">32강 진출 — 조 ${userRank}위! 🎉</h1>
-      <p class="subtitle">${me.flag} ${me.name} — 완벽한 선방쇼! 심판이 건넨 <b>치킨</b> 한 입! <b>치킨 먹자!</b> 🍗</p>
+      <p class="subtitle">${me.flag} ${me.name} — 완벽한 선방쇼! 손으로 직접 <b>치킨</b>을 한 입씩 냠냠! <b>치킨 먹자!</b> 🍗</p>
       ${miniTable()}
       <button id="againBtn">처음으로 돌아갈까요? ↻</button>
     </div>`);
@@ -1768,11 +1810,11 @@ function showBeerPanel() {
 }
 
 // ============================================================
-//  조 2위 컷신: 동료들이 달려와 포옹
+//  조 2위 컷신: 동료 3명과 하이파이브(손으로 짝!)
 // ============================================================
+// a.palmY: 손바닥 높이(머리 위), a.done: 하이파이브 완료, a.flash: 짝! 섬광
 function drawMate(a) {
   const s = a.scale * Math.min(W, H);
-  const D = a.dir || 1;
   ctx.save();
   ctx.translate(a.x*W, a.y*H - (a.bob || 0) * s);
   const jersey = a.color, jd = shade(a.color, -40), skin = "#d8a878";
@@ -1787,60 +1829,111 @@ function drawMate(a) {
   ctx.beginPath(); ctx.ellipse(s*0.05-sw, 0, s*0.06, s*0.035, 0, 0, Math.PI*2); ctx.fill();
   ctx.fillStyle = jersey; ctx.strokeStyle = jd; ctx.lineWidth = s*0.02;
   roundRect(-s*0.15, -s*0.58, s*0.30, s*0.30, s*0.06); ctx.fill(); ctx.stroke();
-  // 포옹하려 뻗는 양팔(중앙 방향)
-  const reach = a.reach || 0, ax = s*(0.13 + reach*0.20) * D;
+  // 한 팔은 자연스럽게 내리고, 한 팔(D쪽)을 위로 들어 손바닥 펼침(하이파이브 대기)
+  const D = a.dir || 1;
   ctx.strokeStyle = jersey; ctx.lineWidth = s*0.08; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(-s*0.10*D, -s*0.50); ctx.lineTo(ax, -s*0.44); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(s*0.10*D, -s*0.50); ctx.lineTo(ax, -s*0.36); ctx.stroke();
-  ctx.fillStyle = skin;
-  ctx.beginPath(); ctx.arc(ax, -s*0.40, s*0.05, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-s*0.10*D, -s*0.50); ctx.lineTo(-s*0.12*D, -s*0.30); ctx.stroke(); // 내린 팔
+  const px = s*0.30*D, py = -s*1.02;                       // 든 손 위치(머리 위)
+  const bounce = a.done ? 0 : Math.sin((a.t||0)*0.012)*s*0.04;
+  ctx.beginPath(); ctx.moveTo(s*0.10*D, -s*0.52); ctx.lineTo(px, py + bounce); ctx.stroke();
+  // 손바닥(펼친 손)
+  ctx.fillStyle = a.done ? "#4ade80" : skin; ctx.strokeStyle = shade(a.done ? "#4ade80" : skin, -35); ctx.lineWidth = s*0.02;
+  ctx.beginPath(); ctx.arc(px, py + bounce, s*0.085, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  for (let i = 0; i < 4; i++) {                            // 손가락
+    const fa = -Math.PI*0.5 + (i-1.5)*0.32;
+    ctx.lineWidth = s*0.03; ctx.strokeStyle = skin;
+    ctx.beginPath(); ctx.moveTo(px, py + bounce); ctx.lineTo(px + Math.cos(fa)*s*0.11, py + bounce + Math.sin(fa)*s*0.11); ctx.stroke();
+  }
+  if (a.done) { ctx.fillStyle = "#fff"; ctx.font = `bold ${Math.round(s*0.10)}px 'Segoe UI'`; ctx.textAlign = "center"; ctx.fillText("✓", px, py + bounce + s*0.04); }
+  // 머리
   ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, -s*0.68, s*0.10, 0, Math.PI*2); ctx.fill();
   ctx.fillStyle = "#1a1410"; ctx.beginPath(); ctx.arc(0, -s*0.70, s*0.10, Math.PI*1.05, Math.PI*2.05); ctx.fill();
   ctx.restore();
+  // 짝! 섬광
+  if (a.flash > 0) {
+    const fx = a.x*W + px, fy = a.y*H + py;
+    ctx.save(); ctx.globalAlpha = clamp(a.flash, 0, 1);
+    ctx.fillStyle = "#fde047"; ctx.font = `900 ${Math.round(s*0.4)}px 'Segoe UI'`; ctx.textAlign = "center";
+    ctx.fillText("짝!", a.x*W + px, a.y*H + py - s*0.2);
+    ctx.restore();
+  }
 }
-// ---- 조 2위: 동료들과 포옹 ----
-function startHugScene(table) {
-  GAME.screen = "hug"; hudEl.classList.add("hidden"); uiEl.innerHTML = "";
-  GAME.hug = { phase: "approach", timer: 0, prog: 0, panelShown: false, table };
+// ---- 조 2위: 동료 3명과 하이파이브 ----
+function startHighFiveScene(table) {
+  GAME.screen = "highfive"; hudEl.classList.add("hidden"); uiEl.innerHTML = "";
+  const col = getCountry(GAME.userCode).colors.primary;
+  // 손바닥(palm) 목표 = 화면 좌표(정규화). 머리 위 높이.
+  const mates = [
+    { x: 0.28, y: 0.74, scale: 0.27, color: col, dir: 1,  done: false, flash: 0, t: 0 },
+    { x: 0.50, y: 0.70, scale: 0.30, color: col, dir: 1,  done: false, flash: 0, t: 0 },
+    { x: 0.72, y: 0.74, scale: 0.27, color: col, dir: -1, done: false, flash: 0, t: 0 },
+  ];
+  for (const m of mates) {                  // palm 화면 좌표 미리 계산
+    const s = m.scale * Math.min(W, H);
+    m.palm = { x: m.x + (0.30*m.dir*s)/W, y: m.y - (1.02*s)/H };
+  }
+  GAME.highfive = { phase: "play", timer: 0, panelShown: false, table, mates, slaps: 0, lastHands: {} };
 }
-function updateHug(dt) {
-  const A = GAME.hug; A.timer += dt;
-  if (A.phase === "approach") { A.prog = Math.min(1, A.timer/1500); if (A.timer >= 1500) { A.phase = "hug"; A.timer = 0; } }
-  else if (A.phase === "hug") { if (A.timer > 1900) { A.phase = "done"; A.timer = 0; } }
-  else if (A.phase === "done") { if (!A.panelShown && A.timer > 500) { A.panelShown = true; showHugPanel(); } }
+function updateHighFive(dt) {
+  const A = GAME.highfive; A.timer += dt;
+  for (const m of A.mates) { m.t += dt; if (m.flash > 0) m.flash -= dt/450; }
+  // 손으로 손바닥 터치 감지
+  for (const h of hands) {
+    const hx = h.x*W, hy = h.y*H, key = h.label || "h";
+    const L = A.lastHands[key] || { x: hx, y: hy };
+    const sp = Math.hypot(hx - L.x, hy - L.y);
+    A.lastHands[key] = { x: hx, y: hy };
+    for (const m of A.mates) {
+      if (m.done) continue;
+      const dx = hx - m.palm.x*W, dy = hy - m.palm.y*H;
+      if (Math.hypot(dx, dy) < Math.min(W,H)*0.09 && sp > 3) {
+        m.done = true; m.flash = 1; A.slaps++; playSlap();
+        burst(m.palm.x*W, m.palm.y*H, "253,224,71", 16);
+      }
+    }
+  }
+  const allDone = A.mates.every(m => m.done);
+  if (A.phase === "play") {
+    if (allDone) { A.phase = "done"; A.timer = 0; }
+    else if (A.timer > 12000) { A.phase = "done"; A.timer = 0; }   // 안전 타임아웃
+  } else if (A.phase === "done") {
+    if (!A.panelShown && A.timer > 900) { A.panelShown = true; showHighFivePanel(); }
+  }
   updateParticles(dt);
 }
-function renderHug(dt) {
-  const A = GAME.hug;
+function renderHighFive(dt) {
+  const A = GAME.highfive;
   drawStadium();
   ctx.fillStyle = "rgba(74,222,128,0.06)"; ctx.fillRect(0, 0, W, H*0.5);
+  for (const m of A.mates) {
+    drawMate(m);
+    if (!m.done) {     // 아직 안 친 손바닥에 안내 링
+      const pulse = 0.5 + 0.5*Math.sin(m.t*0.008);
+      ctx.save(); ctx.globalAlpha = 0.4 + pulse*0.4;
+      ctx.strokeStyle = "#fde047"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(m.palm.x*W, m.palm.y*H, Math.min(W,H)*(0.05 + pulse*0.02), 0, Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+  }
   if (GAME.tracking) drawGloves(getCountry(GAME.userCode).colors.glove);
-  const col = getCountry(GAME.userCode).colors.primary;
-  const p = A.phase === "approach" ? A.prog : 1;
-  const bob = A.phase === "hug" ? Math.abs(Math.sin(A.timer*0.012)) * 0.04 : 0;
-  const wk = A.phase === "approach" ? A.timer*0.02 : 0;
-  drawMate({ x: lerp(0.78, 0.5, p), y: 0.70, scale: 0.24, color: col, reach: p*0.6, dir: -1, walk: wk, bob });
-  drawMate({ x: lerp(-0.2, 0.33, p), y: 0.75, scale: 0.28, color: col, reach: p, dir: 1, walk: wk, bob });
-  drawMate({ x: lerp(1.2, 0.67, p), y: 0.75, scale: 0.28, color: col, reach: p, dir: -1, walk: wk, bob });
   drawParticles();
-  if (A.phase === "hug" && Math.sin(A.timer*0.02) > 0.6) burst(W*0.5, H*0.42, "251,191,36", 2);
-  let line = null;
-  if (A.phase === "approach") line = "조 2위! 같이 가자!! 🤗";
-  else if (A.phase === "hug") line = "우리가 해냈어!! 🎉";
-  if (line) speechBubble(W*0.5, 0.70*H - 0.28*Math.min(W,H)*0.85, line);
+  const line = A.phase === "done"
+    ? "우리가 해냈어!! 16강으로!! 🎉"
+    : `손바닥을 손으로 쳐서 하이파이브! (${A.slaps}/3) ✋`;
+  speechBubble(W*0.5, H*0.30, line);
 }
-function showHugPanel() {
+function showHighFivePanel() {
   const me = getCountry(GAME.userCode);
   const r = sortedTable().findIndex(t => t.code === GAME.userCode) + 1;
   show(`
     <div class="panel wide">
-      <div class="cup">🤗🎟</div>
+      <div class="cup">✋🎟</div>
       <h1 style="color:#4ade80">32강 진출 — 조 ${r}위! 🎉</h1>
-      <p class="subtitle">${me.flag} ${me.name} — 동료들이 우르르 달려와 와락 포옹! 함께 16강으로! 🤝</p>
+      <p class="subtitle">${me.flag} ${me.name} — 동료 3명과 짝짝짝 하이파이브! 함께 16강으로! 🙌</p>
       ${miniTable()}
       <button id="againBtn">처음으로 돌아갈까요? ↻</button>
     </div>`);
-  document.getElementById("againBtn").onclick = () => { GAME.hug = null; showDifficultySelect(); };
+  document.getElementById("againBtn").onclick = () => { GAME.highfive = null; showDifficultySelect(); };
 }
 
 // ---- 조 4위: 경찰차 + 경찰관 2명 등장 ----
@@ -2098,6 +2191,32 @@ function showSlapPanel() {
 //  공격수 변신 모드 (손흥민 찰칵 → 발로 차기 · 발 추적)
 // ============================================================
 let STRIKER = null;
+// 난이도 → 골키퍼 능력치 (쉬움=허술, 레전드=세계최고)
+function strikerKeeperSkill() {
+  const L = GAME.difficulty || LEVELS[1];
+  const idx = Math.max(0, LEVELS.indexOf(L));
+  const f = idx / (LEVELS.length - 1);          // 0(쉬움)~1(레전드)
+  return {
+    label: L.label, emoji: L.emoji, f,
+    react: lerp(470, 95, f),        // 반응 지연(ms) — 어려울수록 빠름
+    diveSpeed: lerp(0.0016, 0.0044, f), // 다이브 속도(goal폭 단위/ms)
+    reach: lerp(0.34, 0.94, f),     // 선방 반경(goal폭 단위) — 어려울수록 넓음
+    err: lerp(0.95, 0.12, f),       // 예측 오차 — 어려울수록 정확
+  };
+}
+// 먼 골대 기하 (drawFarGoal과 동일)
+function farGoal() { return { cx: W*0.5, topY: H*0.16, gw: W*0.34, gh: H*0.16 }; }
+function newStrikerState() {
+  return {
+    phase: "ready", flash: 1, last: {}, kicks: 0, goals: 0, saves: 0, misses: 0,
+    ball: { x: 0.5*W, y: 0.80*H, scale: 1, spin: 0, spinAng: 0 },
+    shot: null,                 // 비행 중 슛 파라미터
+    impact: null,               // 마지막 임팩트 지점(다이어그램용)
+    keeper: { x: 0, guess: 0, react: 0, committed: false, dive: 0 },
+    result: null, resultT: 0,
+    skill: strikerKeeperSkill(),
+  };
+}
 function enterStrikerMode() {
   ensurePose();
   audioInit();
@@ -2107,9 +2226,90 @@ function enterStrikerMode() {
   feet = [];
   hudEl.classList.add("hidden");
   uiEl.innerHTML = "";
-  STRIKER = { ball: { x: 0.5*W, y: 0.80*H, scale: 1, flying: false, vx: 0, vy: 0, spin: 0 },
-              goals: 0, kicks: 0, flash: 1, last: {} };
+  STRIKER = newStrikerState();
   strikerExitBtn.classList.remove("hidden");
+}
+// 슛! — 발이 공을 차는 순간: 방향·강도·회전·임팩트 지점 산출
+function kickBall(S, f) {
+  const g = farGoal(), minWH = Math.min(W, H), b = S.ball;
+  const br = minWH * 0.05 * b.scale;
+  const sp = Math.hypot(f.vx, f.vy);
+  // 임팩트 지점: 공 중심 → 발 위치 (정규화 -1~1, 공 표면 기준)
+  let ox = (f.sx - b.x) / br, oy = (f.sy - b.y) / br;
+  const om = Math.hypot(ox, oy) || 1;
+  if (om > 1) { ox /= om; oy /= om; }
+  // 발 진행 방향
+  const dirA = Math.atan2(f.vy, f.vx);
+  // 진행방향에 수직인 임팩트 오프셋 → 회전(감아차기). 발 각도가 빗맞을수록 회전↑
+  const perp = ox * Math.cos(dirA + Math.PI/2) + oy * Math.sin(dirA + Math.PI/2);
+  const spin = clamp(-perp * 1.15, -1, 1);
+  // 강도(파워): 발 속도
+  const power = clamp(sp / 26, 0.45, 1.5);
+  // 좌우 조준: 발 가로 속도 + 임팩트 가로 오프셋(반대로 밀림)
+  const gx = clamp(f.vx / 22 - ox * 0.45, -1.25, 1.25);
+  // 상하 조준: 위로 강하게 찰수록 높게 (gy 1=바닥, -1=상단)
+  const gy = clamp(0.55 + f.vy / 55 + (power - 0.9) * 0.25, -1.0, 1.0);
+  const tx = g.cx + gx * (g.gw * 0.5 * 0.95);
+  const ty = g.topY + g.gh * (0.5 - gy * 0.42);
+  S.shot = { kx: b.x, ky: b.y, tx, ty, gx, gy, spin, power, t: 0,
+             dur: lerp(1150, 620, clamp((power - 0.45) / 1.05, 0, 1)),
+             curveAmp: spin * W * 0.13 };
+  S.impact = { ox, oy, spin, power, t: 2400 };
+  b.spin = spin;
+  S.phase = "flying"; S.kicks++; S.result = null; S.resultT = 0;
+  playKick();
+  // 골키퍼: 반응 지연 후 예측 지점으로 다이브
+  S.keeper.committed = false;
+  S.keeper.react = S.skill.react;
+  S.keeper.guess = clamp(gx + (Math.random() * 2 - 1) * S.skill.err, -1.15, 1.15);
+}
+function updateShot(S, dt) {
+  const sh = S.shot, b = S.ball;
+  sh.t += dt / sh.dur;
+  if (sh.t >= 1) { sh.t = 1; resolveShot(S); return; }
+  const t = sh.t;
+  const curve = Math.sin(t * Math.PI) * sh.curveAmp;          // 감아차기(바나나 궤적)
+  b.x = lerp(sh.kx, sh.tx, t) + curve;
+  b.y = lerp(sh.ky, sh.ty, Math.pow(t, 0.85)) - Math.sin(t * Math.PI) * H * 0.06 * sh.power;
+  b.scale = lerp(1, 0.34, t);
+  b.spinAng += 0.25 + Math.abs(sh.spin) * 0.55;
+}
+function resolveShot(S) {
+  const sh = S.shot, g = farGoal();
+  const onTarget = Math.abs(sh.gx) <= 1 && sh.gy >= -1 && sh.gy <= 1;
+  const dx = Math.abs(S.keeper.x - sh.gx);
+  const saved = onTarget && dx < S.skill.reach;
+  S.ball.x = g.cx + sh.gx * (g.gw * 0.5 * 0.95);
+  S.ball.y = g.topY + g.gh * (0.5 - sh.gy * 0.42);
+  if (!onTarget) { S.result = "miss"; S.misses++; }
+  else if (saved) {
+    S.result = "save"; S.saves++; playSlap();
+    S.keeper.x = sh.gx; S.keeper.dive = 1;                    // 공 쪽으로 붙어 선방
+    burst(S.ball.x, S.ball.y, "147,197,253", 16);
+  } else {
+    S.result = "goal"; S.goals++; playKick();
+    burst(S.ball.x, S.ball.y, "74,222,128", 24);
+  }
+  S.phase = "result"; S.resultT = 0;
+}
+function updateKeeper(S, dt) {
+  const k = S.keeper;
+  if (S.phase === "flying") {
+    if (k.react > 0) { k.react -= dt; }
+    else {
+      k.committed = true;
+      const step = S.skill.diveSpeed * dt;
+      if (Math.abs(k.guess - k.x) <= step) k.x = k.guess;
+      else k.x += Math.sign(k.guess - k.x) * step;
+      k.dive = clamp(Math.abs(k.x) * 1.1, 0, 1);
+    }
+  } else if (S.phase === "ready") {
+    k.x = lerp(k.x, 0, 0.06); k.dive = lerp(k.dive, 0, 0.1);  // 중앙 복귀
+  }
+}
+function resetStrikerBall(S) {
+  S.ball = { x: 0.5*W, y: 0.80*H, scale: 1, spin: 0, spinAng: S.ball.spinAng };
+  S.shot = null; S.phase = "ready"; S.result = null;
 }
 function exitStrikerMode() {
   GAME.inputMode = "hand"; feet = []; STRIKER = null;
@@ -2146,58 +2346,188 @@ function drawBoot(x, y, s) {
 function updateStriker(dt) {
   const S = STRIKER; if (!S) return;
   S.flash = Math.max(0, S.flash - dt/500);
+  if (S.impact) S.impact.t -= dt;
   const b = S.ball, minWH = Math.min(W, H);
+  // 발 위치/속도 갱신
   for (const f of feet) {
     const fx = f.x*W, fy = f.y*H, L = S.last[f.side];
     f.sx = fx; f.sy = fy; f.vx = L ? fx - L.x : 0; f.vy = L ? fy - L.y : 0;
     S.last[f.side] = { x: fx, y: fy };
   }
-  if (b.flying) {
-    b.x += b.vx; b.y += b.vy; b.vy += 0.25; b.vx *= 0.99; b.scale *= 0.972; b.spin += 0.3;
-    if (b.scale < 0.30 || b.y < H*0.16) {
-      const inGoal = Math.abs(b.x - W*0.5) < W*0.17 && b.y < H*0.45;
-      if (inGoal) { S.goals++; burst(b.x, b.y, "74,222,128", 20); }
-      b.x = 0.5*W; b.y = 0.80*H; b.scale = 1; b.flying = false; b.vx = 0; b.vy = 0;
-    }
-  } else {
+  if (S.phase === "ready") {
+    b.spinAng += 0.02;
     const br = minWH*0.05*b.scale;
     for (const f of feet) {
       const sp = Math.hypot(f.vx, f.vy);
-      if (Math.hypot(f.sx - b.x, f.sy - b.y) < br + minWH*0.06 && sp > 16) {
-        b.flying = true; S.kicks++;
-        b.vx = f.vx*1.3; b.vy = Math.min(-11, f.vy*1.3 - 6);   // 위(골대) 방향
-        playKick();
-        break;
-      }
+      if (Math.hypot(f.sx - b.x, f.sy - b.y) < br + minWH*0.05 && sp > 14) { kickBall(S, f); break; }
     }
+  } else if (S.phase === "flying") {
+    updateShot(S, dt);
+  } else if (S.phase === "result") {
+    S.resultT += dt;
+    if (S.resultT > 1500) resetStrikerBall(S);
   }
+  updateKeeper(S, dt);
   updateParticles(dt);
 }
 function renderStriker(dt) {
   const S = STRIKER; if (!S) return;
-  drawStadium();
-  drawFarGoal();
+  drawStadium(false);         // 손흥민 모드: 내 골대(가까운 골대) 숨김
+  drawScoreboard(S);          // 왼쪽 사용자 화면(전광판, 내 전신)
+  drawFarGoal();              // 상대방 골대만 표시
+  drawKeeperFar(S);           // 골키퍼
   const b = S.ball, br = Math.min(W,H)*0.05*b.scale;
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath(); ctx.ellipse(b.x, b.y + br*0.9, br*0.9, br*0.3, 0, 0, Math.PI*2); ctx.fill();
-  drawSoccerBall(b.x, b.y, br, b.spin);
+  drawSoccerBall(b.x, b.y, br, b.spinAng);
+  // 임팩트 지점 마커(공 위) — 비행 초반에 어디를 찼는지 표시
+  if (S.phase === "flying" && S.shot.t < 0.55 && S.impact) {
+    const ix = b.x + S.impact.ox*br, iy = b.y + S.impact.oy*br;
+    ctx.fillStyle = "#f43f5e"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(ix, iy, br*0.24, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  }
   for (const f of feet) drawBoot(f.x*W, f.y*H, Math.min(W,H)*0.05);
   drawParticles();
+  // 임팩트 다이어그램(좌하단)
+  if (S.impact && S.impact.t > 0) drawImpactDiagram(S.impact);
   // 상단 HUD
   ctx.textAlign = "center"; ctx.fillStyle = "#fff";
-  ctx.font = `bold ${Math.round(W*0.022)}px 'Segoe UI', sans-serif`;
-  ctx.fillText(`⚽ 발로 공을 차세요!   골 ${S.goals}   ·   슛 ${S.kicks}`, W/2, H*0.07);
+  ctx.font = `bold ${Math.round(W*0.020)}px 'Segoe UI', sans-serif`;
+  ctx.fillText(`⚽ 손흥민 모드   골 ${S.goals} · 선방 ${S.saves} · 슛 ${S.kicks}`, W/2, H*0.385);
+  ctx.fillStyle = "#fbbf24"; ctx.font = `bold ${Math.round(W*0.015)}px 'Segoe UI', sans-serif`;
+  ctx.fillText(`${S.skill.emoji} 골키퍼 난이도: ${S.skill.label}`, W/2, H*0.385 + Math.round(W*0.026));
+  // 결과 배너
+  if (S.phase === "result" && S.result) drawStrikerResult(S);
   // 변신 플래시
   if (S.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${S.flash*0.5})`; ctx.fillRect(0, 0, W, H); }
   if (S.flash > 0.25) {
-    ctx.fillStyle = "#fbbf24"; ctx.font = `900 ${Math.round(W*0.05)}px 'Segoe UI', sans-serif`;
-    ctx.fillText("⚽ 공격수 변신!", W/2, H*0.42);
+    ctx.fillStyle = "#fbbf24"; ctx.textAlign = "center"; ctx.font = `900 ${Math.round(W*0.05)}px 'Segoe UI', sans-serif`;
+    ctx.fillText("⚽ 공격수 변신!", W/2, H*0.50);
   }
-  // 발 미인식 안내
+  // 발 미인식 안내 — 왼쪽 사용자 화면(전광판) 아래
+  const sbx = W*0.025, sby = H*0.06, sbw = W*0.16, sbh = H*0.50;
+  const gx = sbx, gy = sby + sbh + 60;   // 화면 라벨(🔴 LIVE) 아래
+  ctx.textAlign = "left";
   if (feet.length === 0) {
-    ctx.fillStyle = "#f87171"; ctx.font = `bold ${Math.round(W*0.020)}px 'Segoe UI', sans-serif`;
-    ctx.fillText("🦵 발이 카메라에 보이도록 뒤로 물러서세요 (전신이 보이게)", W/2, H*0.90);
+    ctx.fillStyle = "#f87171"; ctx.font = `bold ${Math.round(W*0.012)}px 'Segoe UI', sans-serif`;
+    ctx.fillText("🦵 발이 카메라에 보이도록", gx, gy);
+    ctx.fillText("뒤로 물러서세요 (전신이 보이게)", gx, gy + Math.round(W*0.018));
+  } else if (S.phase === "ready") {
+    ctx.fillStyle = "#a7f3d0"; ctx.font = `bold ${Math.round(W*0.012)}px 'Segoe UI', sans-serif`;
+    ctx.fillText("🦶 공 옆에서 발을 빠르게 휘둘러 슛!", gx, gy);
+    ctx.fillText("(빗맞히면 감아차기 회전)", gx, gy + Math.round(W*0.018));
   }
+}
+// ---- 골대 뒤 전광판: 웹캠으로 내 전신 표시(거울) + 발 추적 마커 ----
+function drawScoreboard(S) {
+  const bw = W*0.16, bh = H*0.50, bx = W*0.025, by = H*0.06;
+  ctx.save();
+  // 프레임
+  ctx.fillStyle = "#0a0e16"; roundRect(bx-10, by-8, bw+20, bh+42, 14); ctx.fill();
+  ctx.strokeStyle = "#22d3ee"; ctx.lineWidth = 3; roundRect(bx-10, by-8, bw+20, bh+42, 14); ctx.stroke();
+  // 영상(거울, cover)
+  ctx.save();
+  roundRect(bx, by, bw, bh, 8); ctx.clip();
+  ctx.fillStyle = "#05070c"; ctx.fillRect(bx, by, bw, bh);
+  if (videoEl && videoEl.readyState >= 2 && videoEl.videoWidth) {
+    const vw = videoEl.videoWidth, vh = videoEl.videoHeight, sc = Math.max(bw/vw, bh/vh);
+    ctx.translate(bx + bw/2, by + bh/2); ctx.scale(-1, 1);   // 거울
+    ctx.drawImage(videoEl, -vw*sc/2, -vh*sc/2, vw*sc, vh*sc);
+  } else {
+    ctx.fillStyle = "#64748b"; ctx.textAlign = "center";
+    ctx.font = `bold ${Math.round(W*0.014)}px 'Segoe UI', sans-serif`;
+    ctx.fillText("📡 전광판 연결 중…", bx + bw/2, by + bh/2);
+  }
+  ctx.restore();
+  // 발 추적 마커(전광판 좌표)
+  for (const f of feet) {
+    const mx = bx + f.x*bw, my = by + f.y*bh;
+    ctx.fillStyle = "#22d3ee"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(mx, my, 5, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  }
+  // 라벨
+  ctx.textAlign = "left"; ctx.fillStyle = "#f87171";
+  ctx.font = `bold ${Math.round(W*0.013)}px 'Segoe UI', sans-serif`;
+  ctx.fillText("🔴 LIVE", bx, by + bh + 22);
+  ctx.fillStyle = "#22d3ee"; ctx.textAlign = "right";
+  ctx.fillText("전광판 · 내 전신", bx + bw, by + bh + 22);
+  ctx.restore();
+}
+// ---- 골키퍼 (먼 골대 안, 다이브 애니메이션) ----
+function drawKeeperFar(S) {
+  const g = farGoal(), k = S.keeper;
+  const cx = g.cx + k.x * (g.gw*0.5*0.92);
+  const baseY = g.topY + g.gh*0.99;
+  const s = Math.min(W,H)*0.105, ext = k.dive, lean = k.x*0.45;
+  const dir = k.x >= 0 ? 1 : -1;
+  ctx.save(); ctx.translate(cx, baseY); ctx.rotate(lean*0.45);
+  const jersey = "#16a34a", jd = "#0f7a36", skin = "#e0b48c", glove = "#fde047";
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.beginPath(); ctx.ellipse(0, 2, s*0.5, s*0.12, 0, 0, Math.PI*2); ctx.fill();
+  // 다리(다이브 시 벌어짐)
+  ctx.strokeStyle = "#1f2937"; ctx.lineCap = "round"; ctx.lineWidth = s*0.16;
+  ctx.beginPath(); ctx.moveTo(-s*0.06, -s*0.55); ctx.lineTo(-s*0.18 - ext*s*0.25, 0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( s*0.06, -s*0.55); ctx.lineTo( s*0.18 + ext*s*0.25, 0); ctx.stroke();
+  // 몸통
+  ctx.fillStyle = jersey; ctx.strokeStyle = jd; ctx.lineWidth = s*0.04;
+  roundRect(-s*0.22, -s*1.0, s*0.44, s*0.5, s*0.1); ctx.fill(); ctx.stroke();
+  // 팔(공 쪽으로 쭉 뻗음)
+  const a1x = (0.18 + ext*0.35)*s*dir, a1y = -s*(0.92) - ext*s*0.28;
+  const a2x = (0.34 + ext*0.62)*s*dir, a2y = -s*(0.92) - ext*s*0.52;
+  ctx.strokeStyle = jersey; ctx.lineWidth = s*0.13; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-s*0.10, -s*0.90); ctx.lineTo(a1x, a1y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo( s*0.10, -s*0.90); ctx.lineTo(a2x, a2y); ctx.stroke();
+  // 장갑
+  ctx.fillStyle = glove; ctx.strokeStyle = "#a16207"; ctx.lineWidth = s*0.03;
+  for (const [hx, hy] of [[a1x, a1y], [a2x, a2y]]) { ctx.beginPath(); ctx.arc(hx, hy, s*0.14, 0, Math.PI*2); ctx.fill(); ctx.stroke(); }
+  // 머리
+  ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, -s*1.12, s*0.16, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = "#1a1410"; ctx.beginPath(); ctx.arc(0, -s*1.16, s*0.16, Math.PI*1.05, Math.PI*2.05); ctx.fill();
+  ctx.restore();
+}
+// ---- 임팩트 지점 다이어그램(발이 공 어디를 찼는지) ----
+function drawImpactDiagram(im) {
+  const r = Math.min(W,H)*0.07, cx = W*0.12, cy = H*0.74;
+  ctx.save();
+  ctx.globalAlpha = clamp(im.t/600, 0, 1);
+  ctx.fillStyle = "rgba(8,12,20,0.82)"; ctx.strokeStyle = "#f43f5e"; ctx.lineWidth = 2;
+  roundRect(cx - r*1.55, cy - r*1.75, r*3.1, r*3.5, 12); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center";
+  ctx.font = `bold ${Math.round(W*0.014)}px 'Segoe UI', sans-serif`;
+  ctx.fillText("⚽ 임팩트 지점", cx, cy - r*1.3);
+  drawSoccerBall(cx, cy, r, 0);
+  const ix = cx + im.ox*r, iy = cy + im.oy*r, ang = Math.atan2(im.oy, im.ox);
+  // 발이 들어오는 방향 화살표
+  ctx.strokeStyle = "#22d3ee"; ctx.lineWidth = 4; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(cx + Math.cos(ang)*r*1.95, cy + Math.sin(ang)*r*1.95); ctx.lineTo(ix, iy); ctx.stroke();
+  ctx.fillStyle = "#f43f5e"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(ix, iy, r*0.17, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  // 회전/파워 라벨
+  const sp = Math.round(Math.abs(im.spin)*100);
+  const spinTxt = Math.abs(im.spin) < 0.18 ? "똑바로 정타" : (im.spin > 0 ? `◀ 감아차기 ${sp}%` : `감아차기 ${sp}% ▶`);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#fbbf24"; ctx.font = `bold ${Math.round(W*0.013)}px 'Segoe UI', sans-serif`;
+  ctx.fillText(spinTxt, cx, cy + r*1.55);
+  ctx.fillStyle = "#93c5fd";
+  ctx.fillText(`파워 ${Math.round(im.power/1.5*100)}%`, cx, cy + r*1.55 + Math.round(W*0.018));
+  ctx.restore();
+}
+// ---- 슛 결과 배너 ----
+function drawStrikerResult(S) {
+  const map = {
+    goal: ["⚽ G O A L !", "#4ade80", "키퍼를 뚫었다! 손흥민!! 🔥"],
+    save: ["🧤 SAVE!", "#93c5fd", "골키퍼 선방! 다시 도전!"],
+    miss: ["✈ 빗나감…", "#f87171", "조준이 빗나갔어요"],
+  };
+  const m = map[S.result]; if (!m) return;
+  ctx.save(); ctx.textAlign = "center";
+  ctx.fillStyle = m[1]; ctx.shadowColor = "rgba(0,0,0,0.6)"; ctx.shadowBlur = 18;
+  ctx.font = `900 ${Math.round(W*0.06)}px 'Segoe UI', sans-serif`;
+  ctx.fillText(m[0], W/2, H*0.55);
+  ctx.shadowBlur = 0; ctx.fillStyle = "#fff";
+  ctx.font = `bold ${Math.round(W*0.020)}px 'Segoe UI', sans-serif`;
+  ctx.fillText(m[2], W/2, H*0.55 + Math.round(W*0.045));
+  ctx.restore();
 }
 
 // ============================================================
@@ -2405,7 +2735,7 @@ function adminPreviewRank(rank) {
   adminFakeTable(rank);
   const table = sortedTable();
   if (rank === 1) startBeerScene(table);
-  else if (rank === 2) startHugScene(table);
+  else if (rank === 2) startHighFiveScene(table);
   else if (rank === 3) startPetScene(table);
   else startPoliceScene(table);
 }
@@ -2433,9 +2763,9 @@ function loop(t) {
   } else if (GAME.screen === "police" && GAME.police) {
     updatePolice(dt);
     renderPolice(dt);
-  } else if (GAME.screen === "hug" && GAME.hug) {
-    updateHug(dt);
-    renderHug(dt);
+  } else if (GAME.screen === "highfive" && GAME.highfive) {
+    updateHighFive(dt);
+    renderHighFive(dt);
   } else if (GAME.screen === "slap" && GAME.slap) {
     updateSlap(dt);
     renderSlap(dt);
